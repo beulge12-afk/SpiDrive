@@ -14,7 +14,7 @@ Every 10 seconds SpiDrive compares the local folder with the drive folder:
   - renamed or moved on one side  -> renamed on the other (nothing re-uploaded)
   - deleted on one side           -> moved to a trash on the other side:
         PC files      -> DATA_DIR\\sync-trash\\<date>\\...
-        drive files   -> /SpiDrive Trash/<date>/... on the drive
+        drive files   -> SpiDrive's Trash (restore it in the dashboard)
   - changed on both sides         -> both kept; the PC copy is renamed
                                      "name (conflict 2026-10-28 1416).ext"
 
@@ -35,7 +35,7 @@ from drive_core import DATA_DIR, norm
 INTERVAL = 10
 SETTLE_SECONDS = 3                   # skip files written in the last 3 s (still being saved)
 WINDOWS = os.name == "nt"
-TRASH_REMOTE = "/SpiDrive Trash"
+TRASH_REMOTE = "/SpiDrive Trash"     # where older versions put deleted files; still never synced
 TRASH_LOCAL = os.path.join(DATA_DIR, "sync-trash")
 SYNC_TMP = os.path.join(DATA_DIR, "sync-tmp")
 TRASH_KEEP_DAYS = 30
@@ -202,11 +202,8 @@ class Syncer:
     def _rpath(self, root, rel):
         return norm(posixpath.join(root, rel))
 
-    def _remote_trash(self, root, rel):
-        stamp = time.strftime("%Y-%m-%d %H%M")
-        dest = self.d.free_path(norm(f"{TRASH_REMOTE}/{stamp}{self._rpath(root, rel)}"))
-        self.d.mkdir(posixpath.dirname(dest))
-        self.d.move(self._rpath(root, rel), dest)
+    async def _remote_trash(self, root, rel):
+        await self.d.delete(self._rpath(root, rel))         # to the Trash, restorable for 30 days
 
     # ---------- PC side
 
@@ -410,9 +407,9 @@ class Syncer:
         for k in del_remote:
             rel = rf[k][0]
             try:
-                self._remote_trash(rroot, rel)
+                await self._remote_trash(rroot, rel)
                 self._forget(pair, k)
-                did.append(f"deleted on PC, moved to {TRASH_REMOTE} on drive: {rel}")
+                did.append(f"deleted on PC, moved to the Trash on the drive: {rel}")
             except (OSError, ValueError) as e:
                 self._warn(("dr", pair, k), f"sync: cannot remove {rel} from drive: {e}")
         self.d.db.commit()

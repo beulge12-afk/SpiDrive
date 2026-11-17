@@ -21,8 +21,17 @@ with us, and your encryption key never leaves your device.
 - **Large files.** Files bigger than Telegram's 2 GB limit are split into parts and joined again automatically.
 - **AES-256 encryption (optional).** Files are encrypted on your PC before they are uploaded. Even file
   names are hidden in the channel.
-- **File status like OneDrive.** See which files are online only, on this PC, or always kept on this PC,
-  with live upload and download progress. *Keep on this PC* and *Free up space* with one click.
+- **Trash and earlier versions.** Deleted files wait in the Trash for 30 days, and replaced files keep
+  their previous versions. Restore either from the dashboard.
+- **Photos timeline.** Photos and videos grouped by month, with small previews, so browsing doesn't
+  download full-size images.
+- **Select many files** to move, delete, keep on this PC, or download as one ZIP (folders too).
+- **Keep on this PC.** Chosen files are stored locally so they open instantly and offline;
+  *Free up space* removes the copies again.
+- **Smart search.** Persian spelling variants (ي/ی, ك/ک, digits, half-space) match each other, and
+  filters like `type:video size:>1gb after:2026-01` narrow it down.
+- **Better player.** Plays the next track by itself, remembers where you stopped in a video, and shows
+  subtitles from a matching `.srt` file.
 - **Works where Telegram is blocked.** Connects through your VPN app or a proxy link, or finds a working
   MTProto proxy automatically, and switches when one stops working.
 - **Share files** with any Telegram contact in one click.
@@ -94,7 +103,11 @@ messages belong to which file. Encryption uses AES-256-CTR with a key derived fr
 | File | Purpose |
 |---|---|
 | `app.py` | The app: tray icon, setup wizard, restarts, start with Windows |
-| `drive_core.py` | Storage engine: parts, encryption, index, uploads, downloads |
+| `drive_core.py` | Storage engine: parts, encryption, index, uploads, downloads, trash, versions, previews |
+| `search.py` | Smart search: Persian spelling variants and filters |
+| `thumbs.py`, `zipper.py` | Photo previews, streamed ZIP downloads |
+| `webguard.py` | Stops other websites from using SpiDrive's local servers |
+| `tests/` | Tests (`pip install pytest pytest-aiohttp`, then `pytest`) |
 | `server.py` | Web dashboard and its API |
 | `dav.py`, `mount.py` | The drive letter (WebDAV server + rclone/WinFsp) |
 | `sync.py` | Two-way folder sync |

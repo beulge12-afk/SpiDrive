@@ -1,4 +1,5 @@
 telethon
 cryptography
 aiohttp
+pillow
 python-socks[asyncio]

@@ -17,3 +17,5 @@ DRIVE_SIZE = "1P"               # size File Explorer shows for the drive
 PROXY_MODE = "auto"             # auto | manual | off
 PROXY = ""                      # proxy link for manual mode
 SYNC_FOLDERS = {}               # {r"D:\SpiDrive Sync": "/Sync"}
+TRASH_DAYS = 30                 # deleted files and old versions are kept this long
+KEEP_VERSIONS = 10              # earlier versions kept per file

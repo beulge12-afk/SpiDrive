@@ -15,6 +15,7 @@ import os
 from aiohttp import web
 
 import settings
+import webguard
 from proxy import ProxyManager, client_kwargs
 
 try:
@@ -249,7 +250,13 @@ def make_app(wizard):
     async def not_yet(req):                     # the dashboard asks this while waiting
         return web.json_response({"setup": True}, status=503)
 
-    app = web.Application()
+    @web.middleware
+    async def guard(req, handler):              # other websites must not drive the setup
+        if not webguard.host_ok(req) or not webguard.origin_ok(req):
+            return web.json_response({"error": "Blocked: this request came from another website."}, status=403)
+        return await handler(req)
+
+    app = web.Application(middlewares=[guard])
     app.add_routes(routes)
     return app
 

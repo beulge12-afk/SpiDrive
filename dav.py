@@ -22,6 +22,7 @@ from xml.sax.saxutils import escape
 from aiohttp import web
 
 import config
+import webguard
 from drive_core import Drive, norm
 
 STARTED = time.time()
@@ -223,6 +224,8 @@ class Dav:
         return s["bytes"] + s["pending_bytes"]
 
     async def handle(self, req):
+        if not webguard.host_ok(req):               # blocks DNS-rebinding websites
+            return web.Response(status=421)
         method = req.method.upper()
         fn = getattr(self, "do_" + method.replace("-", "_"), None)
         if fn is None:
@@ -332,11 +335,16 @@ class Dav:
             return web.Response(status=404)
         if not self.d.is_dir(posixpath.dirname(dst)):
             return web.Response(status=409)
+        if dst.startswith(src + "/") or src.startswith(dst + "/"):
+            return web.Response(status=409)         # into itself, or over its own parent
         existed = self.d.exists(dst)
         if existed:
             if req.headers.get("Overwrite", "T").strip().upper() == "F":
                 return web.Response(status=412)
-            await self.d.delete(dst)
+            # programs save by writing a new file and renaming it over the old one:
+            # keep the old one as a version
+            replacing_file = self.d.get_entry(dst) is not None and self.d.get_entry(src) is not None
+            await self.d.delete(dst, reason="version" if replacing_file else "deleted")
         if copy:
             await self.d.copy(src, dst)
         else:

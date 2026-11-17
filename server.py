@@ -12,12 +12,14 @@ Both show the same files. While it runs it also:
   - imports files you send or forward to the channel from Telegram  (every 15 s)
   - removes files whose messages you deleted in Telegram           (every 10 min)
   - backs up the index to the channel                              (every 24 h)
+  - empties trash items and old versions after TRASH_DAYS days      (every hour)
+  - downloads files you chose to keep on this PC
   - keeps SYNC_FOLDERS from config.py in two-way sync               (every 10 s)
   - sends files to Telegram contacts when you press Share
 """
 import asyncio
 import base64
-import mimetypes
+import json
 import os
 import posixpath
 import secrets
@@ -31,8 +33,11 @@ from aiohttp import web
 import config
 import dav
 import sync
-from drive_core import BASE_DIR, DATA_DIR, Drive, norm
+import webguard
+import zipper
+from drive_core import BASE_DIR, DATA_DIR, LIVE, TRASH_DAYS, Drive, norm
 from mount import Mount
+from search import kind_of
 
 HOST = getattr(config, "WEB_HOST", "127.0.0.1")     # keep 127.0.0.1 = only this PC can open it
 PORT = int(getattr(config, "WEB_PORT", 8000))
@@ -43,34 +48,18 @@ SYNC_SECONDS = 15
 PRUNE_SECONDS = 600
 BACKUP_SECONDS = 24 * 3600
 
-DOC_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md", ".csv",
-           ".odt", ".rtf", ".epub", ".srt"}
-ARCHIVE_EXT = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso"}
-
-
-def kind_of(path):
-    ext = posixpath.splitext(path)[1].lower()
-    mt = mimetypes.guess_type(path)[0] or ""
-    if mt.startswith("image/"):
-        return "image"
-    if mt.startswith("video/"):
-        return "video"
-    if mt.startswith("audio/"):
-        return "audio"
-    if ext in DOC_EXT:
-        return "document"
-    if ext in ARCHIVE_EXT:
-        return "archive"
-    return "other"
-
-
-def file_json(r):
-    return {
+def file_json(r, d=None):
+    out = {
         "id": r["id"], "name": posixpath.basename(r["path"]), "path": r["path"],
         "folder": posixpath.dirname(r["path"]), "size": r["size"], "mtime": r["mtime"],
         "created": r["created"], "encrypted": bool(r["encrypted"]), "status": r["status"],
-        "origin": r["origin"], "kind": kind_of(r["path"]),
+        "origin": r["origin"], "kind": kind_of(r["path"]), "keep": bool(r["keep"]),
     }
+    if d is not None:
+        out["local"] = bool(d.is_local(r))
+    if isinstance(r, dict) and "date" in r:
+        out["date"] = r["date"]
+    return out
 
 
 def log(msg):
@@ -101,14 +90,15 @@ async def api_list(req):
     return web.json_response({
         "path": path,
         "dirs": [{"name": n, "path": norm(posixpath.join(path, n))} for n in dirs],
-        "files": [file_json(r) for r in files],
+        "files": [file_json(r, d) for r in files],
     })
 
 
 @routes.get("/api/search")
 async def api_search(req):
-    rows = drive_of(req).search(req.query.get("q", ""))
-    return web.json_response({"files": [file_json(r) for r in rows]})
+    d = drive_of(req)
+    rows, errors = d.search(req.query.get("q", ""))
+    return web.json_response({"files": [file_json(r, d) for r in rows], "errors": errors})
 
 
 @routes.get("/api/stats")
@@ -117,7 +107,7 @@ async def api_stats(req):
     kinds = {}
     total = count = incomplete = 0
     queued = {p["path"] for p in d.pending()}
-    for path, size, status in d.db.execute("SELECT path, size, status FROM files"):
+    for path, size, status in d.db.execute(f"SELECT path, size, status FROM files WHERE {LIVE}"):
         if status != "complete":
             incomplete += path not in queued      # interrupted uploads nobody is finishing
             continue
@@ -126,7 +116,7 @@ async def api_stats(req):
         k["bytes"] += size
         total += size
         count += 1
-    folders = len({posixpath.dirname(p) for (p,) in d.db.execute("SELECT path FROM files")}
+    folders = len({posixpath.dirname(p) for (p,) in d.db.execute(f"SELECT path FROM files WHERE {LIVE}")}
                   | {p for (p,) in d.db.execute("SELECT path FROM dirs")})
     s = d.stats()
     last_backup = d._meta("last_backup")
@@ -134,6 +124,8 @@ async def api_stats(req):
         "files": count, "bytes": total, "folders": folders,
         "incomplete": incomplete,
         "pending": s["pending"], "pending_bytes": s["pending_bytes"],
+        "trash": s["trash"], "trash_bytes": s["trash_bytes"],
+        "versions": s["versions"], "versions_bytes": s["versions_bytes"], "trash_days": TRASH_DAYS,
         "kinds": kinds, "messages": d.db.execute("SELECT COUNT(DISTINCT msg_id) FROM chunks").fetchone()[0],
         "encryption": bool(config.ENCRYPT),
         "channel": getattr(d.channel, "title", ""),
@@ -157,6 +149,9 @@ async def api_jobs(req):
         jobs.append({"id": f"p{p['id']}", "path": p["path"], "state": state,
                      "done": prog.get("done", 0), "total": prog.get("total", p["size"]),
                      "error": prog.get("error"), "t": p["created"]})
+    for fid, k in list(d.keeping.items()):
+        jobs.append({"id": f"k{fid}", "path": k["path"], "state": "keeping", "done": k["done"],
+                     "total": k["total"], "error": None, "t": time.time()})
     cutoff = time.time() - 600
     for sh in req.app["shares"]:
         if sh["state"] == "sharing" or sh["t"] >= cutoff:
@@ -227,7 +222,181 @@ async def api_delete(req):
     if path == "/":
         raise ValueError("refusing to delete the whole drive")
     n = await drive_of(req).delete(path)
+    return web.json_response({"deleted": n, "trashed": True})
+
+
+# ---------------------------------------------------------------- several files at once
+
+@routes.post("/api/batch")
+async def api_batch(req):
+    """{action: delete | move | keep | unkeep, paths: [...], dest: folder for move}"""
+    data = await req.json()
+    d = drive_of(req)
+    paths = [norm(p) for p in data.get("paths") or []]
+    action = data.get("action")
+    if not paths:
+        raise ValueError("Nothing selected.")
+    if action in ("keep", "unkeep"):
+        return web.json_response({"done": d.set_keep(paths, action == "keep"), "errors": []})
+    done, errors = 0, []
+    if action == "move":
+        dest = norm(data.get("dest") or "/")
+        if d.get_entry(dest) is not None:
+            raise ValueError(f"{dest} is a file, not a folder.")
+        if dest != "/":
+            d.mkdir(dest)
+        for p in paths:
+            target = norm(posixpath.join(dest, posixpath.basename(p)))
+            if target == p:
+                continue
+            try:
+                d.move(p, target)
+                done += 1
+            except (OSError, ValueError) as e:
+                errors.append(f"{posixpath.basename(p)}: {e}")
+    elif action == "delete":
+        for p in paths:
+            if p == "/":
+                continue
+            try:
+                done += await d.delete(p)
+            except (OSError, ValueError) as e:
+                errors.append(f"{posixpath.basename(p)}: {e}")
+    else:
+        raise ValueError("Unknown action.")
+    return web.json_response({"done": done, "errors": errors})
+
+
+def zip_items(d, paths):
+    """[(name in zip, entry or None)] for files and folders, named relative to the
+    folder they have in common."""
+    paths = sorted(set(paths))
+    base = posixpath.commonpath([posixpath.dirname(p) for p in paths]) if paths else "/"
+    cut = 1 if base == "/" else len(base) + 1
+    items, seen = [], set()
+    for p in paths:
+        e = d.get_entry(p)
+        if e is not None:
+            if e["status"] in ("complete", "pending") and p not in seen:
+                seen.add(p)
+                items.append((p[cut:], e))
+            continue
+        if not d.is_dir(p):
+            raise FileNotFoundError(p)
+        pre = "/" if p == "/" else p + "/"
+        found = {}
+        for r in d.walk(p):
+            found[r["path"]] = dict(r)
+        for q in d.db.execute("SELECT * FROM pending WHERE substr(path,1,?)=?", (len(pre), pre)):
+            found[q["path"]] = d._pending_entry(q)
+        dirs_with_files = {posixpath.dirname(f) for f in found}
+        for (q,) in d.db.execute("SELECT path FROM dirs WHERE path=? OR substr(path,1,?)=?", (p, len(pre), pre)):
+            if not any(x == q or x.startswith(q + "/") for x in dirs_with_files):
+                items.append((q[cut:], None))
+        for f in sorted(found):
+            if f not in seen:
+                seen.add(f)
+                items.append((f[cut:], found[f]))
+    return items, base
+
+
+@routes.post("/api/zip")
+async def api_zip(req):
+    """Download files and folders as one ZIP. Sent by a form, so the browser saves it."""
+    form = await req.post()
+    paths = [norm(p) for p in json.loads(form.get("paths") or "[]")]
+    if not paths:
+        raise ValueError("Nothing selected.")
+    d = drive_of(req)
+    items, base = zip_items(d, paths)
+    if len(paths) == 1 and d.is_dir(paths[0]) and d.get_entry(paths[0]) is None:
+        name = posixpath.basename(paths[0]) or "SpiDrive"
+    else:
+        name = (posixpath.basename(base) or "SpiDrive") + time.strftime(" %Y-%m-%d")
+    resp = web.StreamResponse(headers={
+        "Content-Type": "application/zip",
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name + '.zip')}"})
+    await resp.prepare(req)
+    try:
+        await zipper.stream(resp.write, d, items)
+    except (ConnectionResetError, ConnectionError):
+        return resp
+    except Exception as e:
+        log(f"zip download stopped: {e!r}")
+        raise ConnectionResetError from e       # the browser shows the download as failed
+    await resp.write_eof()
+    return resp
+
+
+# ---------------------------------------------------------------- trash and versions
+
+@routes.get("/api/trash")
+async def api_trash(req):
+    return web.json_response({"items": drive_of(req).trash_list(), "days": TRASH_DAYS})
+
+
+@routes.post("/api/trash/restore")
+async def api_trash_restore(req):
+    data = await req.json()
+    d, restored, errors = drive_of(req), [], []
+    for i in data.get("ids") or []:
+        try:
+            restored += await d.restore(int(i))
+        except (OSError, ValueError) as e:
+            errors.append(str(e))
+    return web.json_response({"restored": restored, "errors": errors})
+
+
+@routes.post("/api/trash/delete")
+async def api_trash_delete(req):
+    data = await req.json()
+    n = await drive_of(req).purge_batches([int(i) for i in data.get("ids") or []])
     return web.json_response({"deleted": n})
+
+
+@routes.post("/api/trash/empty")
+async def api_trash_empty(req):
+    return web.json_response({"deleted": await drive_of(req).empty_trash()})
+
+
+@routes.get("/api/versions")
+async def api_versions(req):
+    d = drive_of(req)
+    path = norm(req.query.get("path", ""))
+    cur = d.get_entry(path)
+    if cur is None:
+        raise FileNotFoundError(path)
+    return web.json_response({"current": file_json(cur, d), "versions": d.versions(path)})
+
+
+# ---------------------------------------------------------------- photos
+
+@routes.get("/api/photos")
+async def api_photos(req):
+    d = drive_of(req)
+    offset = max(0, int(req.query.get("offset", 0)))
+    limit = min(5000, max(1, int(req.query.get("limit", 1000))))
+    rows = d.photos()
+    return web.json_response({"total": len(rows),
+                              "files": [file_json(r, d) for r in rows[offset:offset + limit]]})
+
+
+@routes.get("/t/{id:-?\\d+}")
+async def thumbnail(req):
+    """Small preview of a photo; 404 when there is none (the page shows an icon)."""
+    d = drive_of(req)
+    e = d.get_entry_by_id(int(req.match_info["id"]))
+    if e is None:
+        raise web.HTTPNotFound()
+    try:
+        data = await d.thumbnail(e)
+    except (OSError, ConnectionError, asyncio.TimeoutError) as err:
+        log(f"preview of {e['path']} failed: {err!r}")
+        data = None
+    if not data:
+        return web.Response(status=404, headers={"Cache-Control": "no-store"})
+    return web.Response(body=data, content_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=604800"})
 
 
 # ---------------------------------------------------------------- sharing
@@ -356,6 +525,7 @@ async def manifest(req):
 # ---------------------------------------------------------------- settings page
 
 import re
+from urllib.parse import quote
 
 SIZE_RE = re.compile(r"^\s*\d+(\.\d+)?\s*[KMGTP]?(I?B)?\s*$", re.I)
 
@@ -549,6 +719,10 @@ async def stream(req):
 
 @web.middleware
 async def guard(req, handler):
+    if not webguard.host_ok(req, any_host=HOST not in ("127.0.0.1", "localhost")):
+        return web.Response(status=421, text="SpiDrive only answers on this PC's own address.")
+    if not webguard.origin_ok(req):
+        return web.json_response({"error": "Blocked: this request came from another website."}, status=403)
     if PASSWORD:
         ok = False
         auth = req.headers.get("Authorization", "")
@@ -669,6 +843,8 @@ async def amain(stop_event=None, interactive=True, hooks=None):
             asyncio.create_task(every(SYNC_SECONDS, d.import_new_messages, "from Telegram")),
             asyncio.create_task(every(PRUNE_SECONDS, d.prune_missing, "deleted in Telegram")),
             asyncio.create_task(every(3600, lambda: maybe_backup(d), "backup")),
+            asyncio.create_task(every(3600, d.purge_expired, "emptied from trash")),
+            asyncio.create_task(d.keep_worker(log)),
             asyncio.create_task(watch_connection(d)),
         ]
         if syncer.pairs:

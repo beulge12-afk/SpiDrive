@@ -12,6 +12,11 @@ Files added through the web dashboard or the Windows drive are first saved
 in DATA_DIR/incoming ("pending"), shown in the drive immediately, and then
 uploaded to Telegram in the background by upload_worker().
 
+Deleting moves files to the trash (kept TRASH_DAYS days), and replacing a file
+keeps the previous one as a version. Both only change the index: a trashed file's
+row stays in `files` with the path "trash:<id>", so its Telegram messages are kept
+until the trash is emptied. Files can be kept on this PC (DATA_DIR/offline).
+
 The web dashboard (server.py) and the Windows drive (dav.py) use this module.
 """
 import asyncio
@@ -30,6 +35,8 @@ from telethon.tl.types import (DocumentAttributeFilename, MessageMediaDocument,
                                MessageMediaPhoto)
 
 import config
+import search
+import thumbs
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SESSION_PATH = getattr(config, "SESSION_PATH", None) or os.path.join(BASE_DIR, "session")  # + ".session"
@@ -41,6 +48,12 @@ TELEGRAM_MAX = 2000 * 1024 * 1024                  # 2 GB limit for non-premium 
 REQUEST_SIZE = 512 * 1024                          # download block size
 UPLOAD_RETRIES = 5
 MEDIA_CACHE_SECONDS = 1800
+THUMBS_PATH = os.path.join(DATA_DIR, "thumbs.db")  # photo previews (never sent to the channel)
+TRASH_LOCAL = os.path.join(DATA_DIR, "trash-local")  # deleted files that never reached Telegram
+OFFLINE = os.path.join(DATA_DIR, "offline")        # files kept on this PC (decrypted)
+TRASH_DAYS = int(getattr(config, "TRASH_DAYS", 30))
+KEEP_VERSIONS = int(getattr(config, "KEEP_VERSIONS", 10))
+LIVE = "substr(path,1,1)='/'"                      # rows that are on the drive (not in the trash)
 
 
 # ---------------------------------------------------------------- helpers
@@ -149,6 +162,7 @@ class Drive:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
+        self.db.execute("ATTACH DATABASE ? AS th", (THUMBS_PATH,))
         self._init_db()
         from proxy import ProxyManager
         self.proxy = ProxyManager(config)              # direct, or through a proxy (proxy.py)
@@ -164,6 +178,11 @@ class Drive:
         self._retry_at = {}           # pending id -> time of next attempt
         self.progress = {}            # pending id -> {"done", "total", "error"}
         self.recent = []              # finished uploads, newest last (for the dashboard)
+        self._thumb_changes = 0       # writes to thumbs.db, left out of version()
+        self._thumb_sem = asyncio.Semaphore(2)
+        self._pending_thumbs = {}     # staged file path -> preview bytes
+        self._keep_wake = asyncio.Event()
+        self.keeping = {}             # file id -> {"done", "total", "path"} while kept files download
 
     # ---------- lifecycle
 
@@ -261,12 +280,43 @@ class Drive:
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
         if "origin" not in cols:     # 'local' = uploaded by SpiDrive, 'telegram' = sent from Telegram
             self.db.execute("ALTER TABLE files ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'")
+        if "keep" not in cols:       # 1 = keep a copy on this PC
+            self.db.execute("ALTER TABLE files ADD COLUMN keep INTEGER NOT NULL DEFAULT 0")
+        if "keep" not in {r[1] for r in self.db.execute("PRAGMA table_info(pending)")}:
+            self.db.execute("ALTER TABLE pending ADD COLUMN keep INTEGER NOT NULL DEFAULT 0")
+        self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS trash_batches(
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            path    TEXT NOT NULL,                     -- what was deleted (or the replaced file)
+            is_dir  INTEGER NOT NULL DEFAULT 0,
+            deleted REAL NOT NULL,
+            reason  TEXT NOT NULL DEFAULT 'deleted'    -- 'deleted' or 'version'
+        );
+        CREATE TABLE IF NOT EXISTS trash_items(
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch     INTEGER NOT NULL REFERENCES trash_batches(id) ON DELETE CASCADE,
+            file_id   INTEGER REFERENCES files(id) ON DELETE CASCADE,
+            orig_path TEXT NOT NULL,
+            is_dir    INTEGER NOT NULL DEFAULT 0,
+            tmp       TEXT,                            -- local copy of a file that never reached Telegram
+            size      INTEGER NOT NULL DEFAULT 0,
+            mtime     REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS trash_items_batch ON trash_items(batch);
+        CREATE INDEX IF NOT EXISTS trash_batches_path ON trash_batches(path);
+        CREATE TABLE IF NOT EXISTS th.thumbs(
+            key    TEXT PRIMARY KEY,                   -- sha256 of the first part, or msg:<id>
+            data   BLOB,
+            taken  REAL,
+            failed INTEGER NOT NULL DEFAULT 0
+        );
+        """)
         self.db.commit()
 
     def version(self):
         """Changes whenever the index changes (here or in another process)."""
         dv = self.db.execute("PRAGMA data_version").fetchone()[0]
-        return f"{self.db.total_changes}-{dv}"
+        return f"{self.db.total_changes - self._thumb_changes}-{dv}"
 
     def _meta(self, key):
         r = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -318,7 +368,8 @@ class Drive:
     def _pending_entry(p):
         return {"id": -p["id"], "path": p["path"], "size": p["size"], "mtime": p["mtime"],
                 "created": p["created"], "encrypted": int(bool(config.ENCRYPT)), "nonce": None,
-                "chunk_size": 0, "status": "pending", "origin": "local", "tmp": p["tmp"]}
+                "chunk_size": 0, "status": "pending", "origin": "local", "tmp": p["tmp"],
+                "keep": p["keep"]}
 
     def get_entry(self, path):
         """Pending upload or stored file at `path`, as a dict, or None."""
@@ -353,20 +404,36 @@ class Drive:
                 return p
             i += 1
 
-    def search(self, query, limit=300):
-        """Files whose name contains `query` (case-insensitive)."""
-        q = query.strip().lower()
-        if not q:
-            return []
-        esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        like = (f"%{esc}%",)
-        found = {p["path"]: self._pending_entry(p) for p in self.db.execute(
-            "SELECT * FROM pending WHERE path LIKE ? ESCAPE '\\'", like)}
+    def search(self, query, limit=500):
+        """Files matching a smart search (see search.py): words in any Persian spelling,
+        plus filters like type:video size:>1gb after:2026-01. Returns (entries, errors)."""
+        q = search.Query(query)
+        if q.empty:
+            return [], q.errors
+
+        def where(size, date):
+            sql, args = "", []
+            for cond, val in ((f" AND {size}>=?", q.min_size), (f" AND {size}<=?", q.max_size),
+                              (f" AND {date}>=?", q.after), (f" AND {date}<?", q.before)):
+                if val is not None:
+                    sql, args = sql + cond, args + [val]
+            return sql, args
+
+        found = {}
+        sql, args = where("size", "mtime")
+        for p in self.db.execute("SELECT * FROM pending WHERE 1" + sql, args):
+            if q.match(p["path"], p["size"], p["mtime"]):
+                found[p["path"]] = self._pending_entry(p)
+        # dates: when a photo was taken (from its preview), else the file date
+        sql, args = where("f.size", "COALESCE(t.taken, f.mtime)")
         for r in self.db.execute(
-                "SELECT * FROM files WHERE status='complete' AND path LIKE ? ESCAPE '\\'", like):
-            found.setdefault(r["path"], dict(r))
-        hits = [e for p, e in sorted(found.items()) if q in posixpath.basename(p).lower()]
-        return hits[:limit]
+                "SELECT f.*, COALESCE(t.taken, f.mtime) AS date FROM files f "
+                "LEFT JOIN chunks c ON c.file_id=f.id AND c.idx=0 "
+                "LEFT JOIN th.thumbs t ON t.key = CASE WHEN c.sha256='' THEN 'msg:'||c.msg_id ELSE c.sha256 END "
+                "WHERE f.status='complete' AND substr(f.path,1,1)='/'" + sql, args):
+            if r["path"] not in found and q.match(r["path"], r["size"], r["date"]):
+                found[r["path"]] = dict(r)
+        return [found[p] for p in sorted(found)][:limit], q.errors
 
     def is_dir(self, path):
         path = norm(path)
@@ -413,11 +480,18 @@ class Drive:
 
     def stats(self):
         r = self.db.execute(
-            "SELECT COUNT(*), COALESCE(SUM(size),0) FROM files WHERE status='complete'").fetchone()
-        inc = self.db.execute("SELECT COUNT(*) FROM files WHERE status!='complete'").fetchone()[0]
+            f"SELECT COUNT(*), COALESCE(SUM(size),0) FROM files WHERE status='complete' AND {LIVE}").fetchone()
+        inc = self.db.execute(f"SELECT COUNT(*) FROM files WHERE status!='complete' AND {LIVE}").fetchone()[0]
         p = self.db.execute("SELECT COUNT(*), COALESCE(SUM(size),0) FROM pending").fetchone()
+        t = self.db.execute(
+            "SELECT COUNT(DISTINCT b.id), COALESCE(SUM(i.size),0) FROM trash_batches b "
+            "LEFT JOIN trash_items i ON i.batch=b.id WHERE b.reason='deleted'").fetchone()
+        v = self.db.execute(
+            "SELECT COUNT(DISTINCT b.id), COALESCE(SUM(i.size),0) FROM trash_batches b "
+            "JOIN trash_items i ON i.batch=b.id WHERE b.reason='version'").fetchone()
         return {"files": r[0], "bytes": r[1], "incomplete": inc,
-                "pending": p[0], "pending_bytes": p[1]}
+                "pending": p[0], "pending_bytes": p[1], "trash": t[0], "trash_bytes": t[1],
+                "versions": v[0], "versions_bytes": v[1]}
 
     def set_mtime(self, path, mtime):
         """Change a file's modified time (Windows sends it after copying a file)."""
@@ -455,6 +529,7 @@ class Drive:
         if self.get_entry(src):
             self.db.execute("UPDATE pending SET path=? WHERE path=?", (dst, src))
             self.db.execute("UPDATE files SET path=? WHERE path=?", (dst, src))
+            self.db.execute("UPDATE trash_batches SET path=? WHERE reason='version' AND path=?", (dst, src))
         elif self.is_dir(src):
             if dst.startswith(src + "/"):
                 raise ValueError("cannot move a folder inside itself")
@@ -465,6 +540,10 @@ class Drive:
                     (src, len(pre), pre)).fetchall()
                 for (p,) in rows:
                     self.db.execute(f"UPDATE {table} SET path=? WHERE path=?", (dst + p[len(src):], p))
+            for bid, p in self.db.execute(
+                    "SELECT id, path FROM trash_batches WHERE reason='version' AND substr(path,1,?)=?",
+                    (len(pre), pre)).fetchall():
+                self.db.execute("UPDATE trash_batches SET path=? WHERE id=?", (dst + p[len(src):], bid))
         else:
             raise FileNotFoundError(src)
         self.db.commit()
@@ -655,17 +734,46 @@ class Drive:
             if row is not None and row["path"] != now_p["path"]:     # renamed while uploading
                 other = self.get_file(now_p["path"])
                 if other is not None and other["id"] != row["id"]:
-                    await self._delete_rows([other])
+                    if other["status"] == "complete":
+                        await self._retire_version(other)
+                    else:
+                        await self._delete_rows([other])
                 self.db.execute("UPDATE files SET path=? WHERE id=?", (now_p["path"], row["id"]))
             if row is not None and row["mtime"] != now_p["mtime"]:
                 self.db.execute("UPDATE files SET mtime=? WHERE id=?", (now_p["mtime"], row["id"]))
+            kept = await self._after_upload(row, now_p)
             self.db.execute("DELETE FROM pending WHERE id=?", (pid,))
             self.db.commit()
-            self._discard(now_p["tmp"])
+            if not kept:
+                self._discard(now_p["tmp"])
             self.progress.pop(pid, None)
             self._retry_at.pop(pid, None)
             self._finished(now_p["path"], "done", now_p["size"])
             log(f"uploaded {now_p['path']}")
+
+    async def _after_upload(self, row, p):
+        """Make the photo preview from the local copy (so it never has to be downloaded),
+        and keep the copy on this PC if asked. Returns True if the copy was kept."""
+        if row is None:
+            return False
+        if thumbs.available() and search.kind_of(p["path"]) == "image":
+            key = self.thumb_key(dict(row))
+            if key and self._thumb_row(key) is None:
+                try:
+                    data, taken = await asyncio.to_thread(thumbs.make, p["tmp"])
+                    self._save_thumb(key, data, taken)
+                except Exception:
+                    pass
+        if not (p["keep"] or row["keep"]):
+            return False
+        self.db.execute("UPDATE files SET keep=1 WHERE id=?", (row["id"],))
+        try:
+            os.makedirs(OFFLINE, exist_ok=True)
+            os.replace(p["tmp"], self.offline_path(row["id"]))
+            return True
+        except OSError:
+            self._keep_wake.set()                   # download it again instead
+            return False
 
     # ---------- upload
 
@@ -679,21 +787,23 @@ class Drive:
         enc = bool(config.ENCRYPT)
 
         row = self.get_file(remote)
+        keep = 0
         if row is not None:
             if row["status"] == "complete":
                 if not overwrite:
                     raise FileExistsError(remote)
-                await self._delete_rows([row])
+                keep = row["keep"]
+                await self._retire_version(row)        # the old file stays restorable
                 row = None
             elif (row["size"], row["mtime"], row["encrypted"]) != (size, mtime, int(enc)):
                 await self._delete_rows([row])         # stale partial upload of a different file
                 row = None
         if row is None:
             self.db.execute(
-                "INSERT INTO files(path,size,mtime,created,encrypted,nonce,chunk_size,status) "
-                "VALUES(?,?,?,?,?,?,?,'uploading')",
+                "INSERT INTO files(path,size,mtime,created,encrypted,nonce,chunk_size,status,keep) "
+                "VALUES(?,?,?,?,?,?,?,'uploading',?)",
                 (remote, size, mtime, time.time(), int(enc),
-                 secrets.token_bytes(16) if enc else None, CHUNK_SIZE))
+                 secrets.token_bytes(16) if enc else None, CHUNK_SIZE, keep))
             self.db.commit()
             row = self.get_file(remote)
 
@@ -769,15 +879,50 @@ class Drive:
         self._media_cache[msg_id] = (msg.media, time.time())
         return msg.media
 
+    def offline_path(self, file_id):
+        return os.path.join(OFFLINE, str(file_id))
+
+    def _local_copy(self, row):
+        """Path of the kept copy on this PC, if it is there and complete."""
+        p = self.offline_path(row["id"])
+        try:
+            return p if os.path.getsize(p) == row["size"] else None
+        except OSError:
+            return None
+
+    @staticmethod
+    async def _iter_file(path, offset, end):
+        with open(path, "rb") as f:
+            f.seek(offset)
+            pos = offset
+            while pos < end:
+                data = await asyncio.to_thread(f.read, min(REQUEST_SIZE, end - pos))
+                if not data:
+                    break
+                pos += len(data)
+                yield data
+
     async def iter_bytes(self, remote, offset=0, length=None):
         """Async generator yielding the (decrypted) bytes of a stored file,
         optionally only a byte range. Used by download and by the servers."""
         row = self.get_file(remote)
         if row is None or row["status"] != "complete":
             raise FileNotFoundError(remote)
+        async for data in self.iter_row(row, offset, length):
+            yield data
+
+    async def iter_row(self, row, offset=0, length=None):
+        """Like iter_bytes, for a files row (also one in the trash). Reads the copy
+        kept on this PC when there is one."""
+        remote = row["path"]
         size = row["size"]
         end = size if length is None else min(size, offset + length)
         if offset >= end:
+            return
+        local = self._local_copy(row)
+        if local:
+            async for data in self._iter_file(local, offset, end):
+                yield data
             return
         key = self._get_key() if row["encrypted"] else None
 
@@ -815,6 +960,9 @@ class Drive:
         row = self.get_file(remote)
         if row is None or row["status"] != "complete":
             raise FileNotFoundError(remote)
+        return await self._download_row(row, local_path, progress)
+
+    async def _download_row(self, row, local_path, progress=None):
         folder = os.path.dirname(os.path.abspath(local_path))
         os.makedirs(folder, exist_ok=True)
         tmp = local_path + ".part"
@@ -823,7 +971,7 @@ class Drive:
             with open(tmp, "wb") as out:
                 for ch in self._chunks(row["id"]):
                     h = hashlib.sha256()
-                    async for data in self.iter_bytes(row["path"], ch["start"], ch["size"]):
+                    async for data in self.iter_row(row, ch["start"], ch["size"]):
                         out.write(data)
                         h.update(data)
                         done += len(data)
@@ -843,19 +991,15 @@ class Drive:
         """Like iter_bytes, but also works for files still waiting to upload
         (those are read from the local copy)."""
         if entry["status"] != "pending":
-            async for data in self.iter_bytes(entry["path"], offset, length):
+            row = self.get_file_by_id(entry["id"])
+            if row is None or row["status"] != "complete":
+                raise FileNotFoundError(entry["path"])
+            async for data in self.iter_row(row, offset, length):
                 yield data
             return
         end = entry["size"] if length is None else min(entry["size"], offset + length)
-        with open(entry["tmp"], "rb") as f:
-            f.seek(offset)
-            pos = offset
-            while pos < end:
-                data = await asyncio.to_thread(f.read, min(REQUEST_SIZE, end - pos))
-                if not data:
-                    break
-                pos += len(data)
-                yield data
+        async for data in self._iter_file(entry["tmp"], offset, end):
+            yield data
 
     # ---------- delete
 
@@ -880,31 +1024,382 @@ class Drive:
             self.db.execute("DELETE FROM files WHERE id=?", (fid,))
         self.db.commit()
 
-    async def delete(self, path):
-        """Delete a file, or a folder and everything in it (also from the channel)."""
+    async def delete(self, path, reason="deleted"):
+        """Move a file, or a folder and everything in it, to the trash. Nothing leaves
+        Telegram until the trash is emptied (by hand, or after TRASH_DAYS days).
+        reason='version' files a replaced file under the versions of its path instead."""
         path = norm(path)
+        if path == "/":
+            raise ValueError("refusing to delete the whole drive")
         if self.get_entry(path) is not None:
             rows = [r for r in [self.get_file(path)] if r is not None]
             pend = [p for p in [self._pending_row(path)] if p is not None]
-            is_folder = False
-        else:
-            pre = "/" if path == "/" else path + "/"
+            dirs, is_folder = [], False
+        elif self.is_dir(path):
+            pre = path + "/"
             rows = self.db.execute(
                 "SELECT * FROM files WHERE substr(path,1,?)=?", (len(pre), pre)).fetchall()
             pend = self.db.execute(
                 "SELECT * FROM pending WHERE substr(path,1,?)=?", (len(pre), pre)).fetchall()
+            dirs = [path] + [p for (p,) in self.db.execute(
+                "SELECT path FROM dirs WHERE substr(path,1,?)=? ORDER BY path", (len(pre), pre))]
             is_folder = True
+        else:
+            raise FileNotFoundError(path)
+        complete = [r for r in rows if r["status"] == "complete"]
+        partial = [r for r in rows if r["status"] != "complete"]
+        if not is_folder and complete and pend:
+            # an uploaded copy plus a newer one still waiting: the uploaded one is a version
+            await self._retire_version(complete.pop(), commit=False)
+        batch = self._new_batch(path, is_folder, "version" if reason == "version" and not is_folder else "deleted")
+        for r in complete:
+            self._trash_row(batch, r)
         for p in pend:
-            self._cancel_if_current(p["id"])
-            self.db.execute("DELETE FROM pending WHERE id=?", (p["id"],))
-            self._discard(p["tmp"])
-        self.db.commit()
-        await self._delete_rows(rows)
+            self._trash_pending(batch, p)
+        for d in dirs:
+            self.db.execute("INSERT INTO trash_items(batch,orig_path,is_dir) VALUES(?,?,1)", (batch, d))
         if is_folder:
             pre = path + "/"
             self.db.execute("DELETE FROM dirs WHERE path=? OR substr(path,1,?)=?", (path, len(pre), pre))
+        self.db.commit()
+        await self._delete_rows(partial)                # interrupted uploads are of no use
+        self._drop_empty_batches()
+        self._keep_wake.set()
+        if reason == "version" and not is_folder:
+            await self._limit_versions(path)
+        return len({r["path"] for r in complete} | {p["path"] for p in pend})
+
+    # ---------- trash and versions
+
+    def _new_batch(self, path, is_dir, reason):
+        return self.db.execute(
+            "INSERT INTO trash_batches(path,is_dir,deleted,reason) VALUES(?,?,?,?)",
+            (path, int(is_dir), time.time(), reason)).lastrowid
+
+    def _trash_row(self, batch, row):
+        """Take a stored file off the drive (its messages stay in the channel)."""
+        self.db.execute(
+            "INSERT INTO trash_items(batch,file_id,orig_path,size,mtime) VALUES(?,?,?,?,?)",
+            (batch, row["id"], row["path"], row["size"], row["mtime"]))
+        self.db.execute("UPDATE files SET path=?, keep=0 WHERE id=?", (f"trash:{row['id']}", row["id"]))
+
+    def _trash_pending(self, batch, p):
+        """Move a file that is still waiting to upload into the local trash folder."""
+        self._cancel_if_current(p["id"])
+        os.makedirs(TRASH_LOCAL, exist_ok=True)
+        dest = os.path.join(TRASH_LOCAL, uuid.uuid4().hex)
+        try:
+            os.replace(p["tmp"], dest)
+        except FileNotFoundError:
+            dest = None
+        except OSError:                                 # still open (Windows): copy it instead
+            try:
+                shutil.copy2(p["tmp"], dest)
+            except OSError:
+                dest = None
+            self._discard(p["tmp"])
+        self.db.execute("DELETE FROM pending WHERE id=?", (p["id"],))
+        if dest:
+            self.db.execute(
+                "INSERT INTO trash_items(batch,orig_path,tmp,size,mtime) VALUES(?,?,?,?,?)",
+                (batch, p["path"], dest, p["size"], p["mtime"]))
+
+    async def _retire_version(self, row, commit=True):
+        """Keep a file that is being replaced as an older version of its path."""
+        self._trash_row(self._new_batch(row["path"], False, "version"), row)
+        if commit:
             self.db.commit()
-        return len({r["path"] for r in rows} | {p["path"] for p in pend})
+            await self._limit_versions(row["path"])
+
+    async def _limit_versions(self, path):
+        old = [b for (b,) in self.db.execute(
+            "SELECT id FROM trash_batches WHERE reason='version' AND path=? ORDER BY deleted DESC, id DESC "
+            "LIMIT -1 OFFSET ?", (path, KEEP_VERSIONS))]
+        if old:
+            await self.purge_batches(old)
+
+    def _drop_empty_batches(self):
+        self.db.execute("DELETE FROM trash_batches WHERE id NOT IN (SELECT batch FROM trash_items)")
+        self.db.commit()
+
+    def trash_list(self):
+        """Deleted items, newest first."""
+        out = []
+        for b in self.db.execute(
+                "SELECT b.*, SUM(CASE WHEN i.is_dir=0 THEN 1 ELSE 0 END) AS files, "
+                "COALESCE(SUM(i.size),0) AS bytes, MAX(i.file_id) AS file_id "
+                "FROM trash_batches b JOIN trash_items i ON i.batch=b.id "
+                "WHERE b.reason='deleted' GROUP BY b.id ORDER BY b.deleted DESC, b.id DESC"):
+            out.append({"id": b["id"], "path": b["path"], "name": posixpath.basename(b["path"]),
+                        "folder": posixpath.dirname(b["path"]), "is_dir": bool(b["is_dir"]),
+                        "deleted": b["deleted"], "expires": b["deleted"] + TRASH_DAYS * 86400,
+                        "files": b["files"] or 0, "bytes": b["bytes"],
+                        "file_id": None if b["is_dir"] else b["file_id"]})
+        return out
+
+    def versions(self, path):
+        """Earlier versions of a file, newest first."""
+        return [dict(r) for r in self.db.execute(
+            "SELECT b.id, b.deleted AS replaced, i.size, i.mtime, i.file_id FROM trash_batches b "
+            "JOIN trash_items i ON i.batch=b.id WHERE b.reason='version' AND b.path=? AND i.file_id IS NOT NULL "
+            "ORDER BY b.deleted DESC, b.id DESC", (norm(path),))]
+
+    def _batch(self, batch_id):
+        b = self.db.execute("SELECT * FROM trash_batches WHERE id=?", (batch_id,)).fetchone()
+        if b is None:
+            raise FileNotFoundError(f"trash item {batch_id}")
+        return b
+
+    async def restore(self, batch_id):
+        """Put a deleted item back where it was. Files whose place is taken now come
+        back as 'name (2).ext'. Restoring a version makes it the current file again
+        (the current one becomes a version). Returns the restored paths."""
+        b = self._batch(batch_id)
+        if b["reason"] == "version":
+            return [await self._restore_version(b)]
+        items = self.db.execute("SELECT * FROM trash_items WHERE batch=? ORDER BY is_dir DESC, orig_path",
+                                (batch_id,)).fetchall()
+        done = []
+        for it in items:
+            dest = it["orig_path"]
+            if it["is_dir"]:
+                if not self.get_entry(dest):
+                    self.mkdir(dest)
+                continue
+            dest = self.free_path(dest)
+            if it["file_id"] is not None:
+                self.db.execute("UPDATE files SET path=? WHERE id=?", (dest, it["file_id"]))
+                self.db.commit()
+                if posixpath.dirname(dest) != "/":
+                    self.mkdir(posixpath.dirname(dest))
+                done.append(dest)
+            elif it["tmp"] and os.path.exists(it["tmp"]):
+                tmp = self.new_staging_path()
+                os.replace(it["tmp"], tmp)
+                self.db.execute("UPDATE trash_items SET tmp=NULL WHERE id=?", (it["id"],))
+                done.append(self.stage(tmp, dest, mtime=it["mtime"]))
+        self.db.execute("DELETE FROM trash_batches WHERE id=?", (batch_id,))
+        self.db.commit()
+        return done
+
+    async def _restore_version(self, b):
+        it = self.db.execute("SELECT * FROM trash_items WHERE batch=? AND file_id IS NOT NULL",
+                             (b["id"],)).fetchone()
+        if it is None:
+            raise FileNotFoundError(f"version {b['id']}")
+        path = b["path"]
+        if self._pending_row(path) is not None:
+            raise ValueError("A newer copy of this file is still uploading. Try again when it is done.")
+        if self.is_dir(path) and self.get_entry(path) is None:
+            raise IsADirectoryError(path)
+        self.db.execute("DELETE FROM trash_batches WHERE id=?", (b["id"],))
+        current = self.get_file(path)
+        if current is not None:
+            if current["status"] == "complete":
+                self._trash_row(self._new_batch(path, False, "version"), current)
+            else:
+                self.db.commit()
+                await self._delete_rows([current])
+        self.db.execute("UPDATE files SET path=? WHERE id=?", (path, it["file_id"]))
+        self.db.commit()
+        if posixpath.dirname(path) != "/":
+            self.mkdir(posixpath.dirname(path))
+        await self._limit_versions(path)
+        return path
+
+    async def purge_batches(self, batch_ids):
+        """Delete trash items for good (their messages leave the channel unless a
+        copy still uses them)."""
+        ids = list(batch_ids)
+        if not ids:
+            return 0
+        marks = ",".join("?" * len(ids))
+        items = self.db.execute(f"SELECT * FROM trash_items WHERE batch IN ({marks})", ids).fetchall()
+        fids = [i["file_id"] for i in items if i["file_id"] is not None]
+        rows = []
+        for i in range(0, len(fids), 500):
+            part = fids[i:i + 500]
+            rows += self.db.execute(
+                f"SELECT * FROM files WHERE id IN ({','.join('?' * len(part))})", part).fetchall()
+        await self._delete_rows(rows)
+        for it in items:
+            if it["tmp"]:
+                self._discard(it["tmp"])
+        self.db.execute(f"DELETE FROM trash_batches WHERE id IN ({marks})", ids)
+        self.db.commit()
+        return sum(1 for i in items if not i["is_dir"])
+
+    async def empty_trash(self):
+        ids = [b for (b,) in self.db.execute("SELECT id FROM trash_batches WHERE reason='deleted'")]
+        return await self.purge_batches(ids)
+
+    async def purge_expired(self, days=None):
+        """Empty trash items and versions older than TRASH_DAYS. Returns what was removed."""
+        days = TRASH_DAYS if days is None else days
+        cutoff = time.time() - days * 86400
+        old = self.db.execute("SELECT id, path, reason FROM trash_batches WHERE deleted<?", (cutoff,)).fetchall()
+        await self.purge_batches([b["id"] for b in old])
+        self._drop_empty_batches()
+        return [f"{'old version of ' if b['reason'] == 'version' else ''}{b['path']}" for b in old]
+
+    # ---------- keep on this PC
+
+    def set_keep(self, paths, keep=True):
+        """Keep files (or everything in folders) on this PC, or free up that space."""
+        n = 0
+        for path in paths:
+            path = norm(path)
+            pre = "/" if path == "/" else path + "/"
+            for table in ("files", "pending"):
+                n += self.db.execute(
+                    f"UPDATE {table} SET keep=? WHERE (path=? OR substr(path,1,?)=?) AND {LIVE}",
+                    (int(bool(keep)), path, len(pre), pre)).rowcount
+        self.db.commit()
+        self._keep_wake.set()
+        return n
+
+    def is_local(self, entry):
+        """True when the file opens without Telegram (waiting upload, or kept copy ready)."""
+        if entry["status"] == "pending":
+            return True
+        return entry["status"] == "complete" and entry.get("keep") and self._local_copy(entry) is not None
+
+    async def keep_worker(self, log=print):
+        """Runs forever: downloads files marked 'keep on this PC' and removes copies
+        that are no longer wanted."""
+        while True:
+            self._keep_wake.clear()
+            try:
+                await self._keep_once(log)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log(f"keep on this PC: {e!r}")
+            try:
+                await asyncio.wait_for(self._keep_wake.wait(), 60)
+            except asyncio.TimeoutError:
+                pass
+
+    async def _keep_once(self, log=print):
+        os.makedirs(OFFLINE, exist_ok=True)
+        wanted = {r["id"]: r for r in self.db.execute(
+            f"SELECT * FROM files WHERE keep=1 AND status='complete' AND {LIVE}")}
+        for name in os.listdir(OFFLINE):
+            fid = name.split(".")[0]
+            if not fid.isdigit() or int(fid) not in wanted:
+                self._discard(os.path.join(OFFLINE, name))
+        for fid, row in wanted.items():
+            fresh = self.get_file_by_id(fid)
+            if fresh is None or not fresh["keep"] or not fresh["path"].startswith("/"):
+                continue
+            if self._local_copy(fresh):
+                continue
+            prog = self.keeping[fid] = {"path": fresh["path"], "done": 0, "total": fresh["size"]}
+            try:
+                await self._download_row(fresh, self.offline_path(fid),
+                                         progress=lambda d, t, prog=prog: prog.update(done=d))
+                log(f"kept on this PC: {fresh['path']}")
+            finally:
+                self.keeping.pop(fid, None)
+            after = self.get_file_by_id(fid)
+            if after is None or not after["keep"]:
+                self._discard(self.offline_path(fid))
+
+    # ---------- photo previews
+
+    def thumb_key(self, entry):
+        if entry.get("status") != "complete":
+            return None
+        c = self.db.execute("SELECT msg_id, sha256 FROM chunks WHERE file_id=? AND idx=0",
+                            (entry["id"],)).fetchone()
+        if c is None:
+            return None
+        return c["sha256"] or f"msg:{c['msg_id']}"
+
+    def _thumb_row(self, key):
+        return self.db.execute("SELECT * FROM th.thumbs WHERE key=?", (key,)).fetchone()
+
+    def _save_thumb(self, key, data, taken=None, failed=False):
+        before = self.db.total_changes
+        self.db.execute("INSERT OR REPLACE INTO th.thumbs(key,data,taken,failed) VALUES(?,?,?,?)",
+                        (key, data, taken, int(failed)))
+        self.db.commit()
+        self._thumb_changes += self.db.total_changes - before
+
+    async def thumbnail(self, entry):
+        """A small JPEG preview of a photo (or of a video sent from Telegram), or None.
+        Made once and stored in thumbs.db."""
+        kind = search.kind_of(entry["path"])
+        if kind not in ("image", "video"):
+            return None
+        if entry["status"] == "pending":
+            if kind != "image" or not thumbs.available():
+                return None
+            hit = self._pending_thumbs.get(entry["tmp"])
+            if hit is None:
+                try:
+                    hit = (await asyncio.to_thread(thumbs.make, entry["tmp"]))[0]
+                except Exception:
+                    hit = b""
+                if len(self._pending_thumbs) > 300:
+                    self._pending_thumbs.clear()
+                self._pending_thumbs[entry["tmp"]] = hit
+            return hit or None
+        key = self.thumb_key(entry)
+        if key is None or not thumbs.available():
+            return None
+        r = self._thumb_row(key)
+        if r is not None:
+            return r["data"]
+        async with self._thumb_sem:
+            r = self._thumb_row(key)
+            if r is not None:
+                return r["data"]
+            row = self.get_file_by_id(entry["id"])
+            if row is None:
+                return None
+            sources = []
+            if row["origin"] == "telegram":            # Telegram already has a preview
+                c = self._chunks(row["id"])
+                msg = await self.client.get_messages(self.channel, ids=c[0]["msg_id"]) if c else None
+                raw = await self.client.download_media(msg, file=bytes, thumb=-1) if msg else None
+                if raw:
+                    sources.append(raw)
+            if kind == "image" and row["size"] <= thumbs.SOURCE_LIMIT and not sources:
+                sources.append(b"".join([d async for d in self.iter_row(row)]))
+            data = taken = None
+            for src in sources:
+                try:
+                    data, taken = await asyncio.to_thread(thumbs.make, src)
+                    break
+                except Exception:
+                    continue
+            self._save_thumb(key, data, taken, failed=data is None)
+            return data
+
+    def photos(self):
+        """Photos and videos on the drive, newest first, with the date they were taken
+        when known (else the file date)."""
+        out = []
+        for r in self.db.execute(
+                "SELECT f.id, f.path, f.size, f.mtime, f.created, f.status, f.encrypted, f.origin, f.keep, "
+                "t.taken, t.failed FROM files f "
+                "LEFT JOIN chunks c ON c.file_id=f.id AND c.idx=0 "
+                "LEFT JOIN th.thumbs t ON t.key = CASE WHEN c.sha256='' THEN 'msg:'||c.msg_id ELSE c.sha256 END "
+                "WHERE f.status='complete' AND substr(f.path,1,1)='/'"):
+            kind = search.kind_of(r["path"])
+            if kind in ("image", "video"):
+                e = dict(r)
+                e["kind"], e["date"] = kind, r["taken"] or r["mtime"]
+                out.append(e)
+        for p in self.pending():
+            kind = search.kind_of(p["path"])
+            if kind in ("image", "video"):
+                e = self._pending_entry(p)
+                e["kind"], e["date"], e["taken"] = kind, p["mtime"], None
+                out.append(e)
+        out.sort(key=lambda e: e["date"], reverse=True)
+        return out
 
     # ---------- Telegram -> drive
 

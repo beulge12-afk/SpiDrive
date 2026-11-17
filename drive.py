@@ -7,7 +7,8 @@ TelegramDrive command line.
   python drive.py ls [remote folder]
   python drive.py mkdir <remote folder>
   python drive.py mv <remote src> <remote dst>
-  python drive.py rm <remote file or folder> [-y]
+  python drive.py rm <remote file or folder> [-y]   (moves it to the trash)
+  python drive.py empty-trash
   python drive.py backup
   python drive.py restore-index [-y]    (after a crash or on a new PC)
 """
@@ -141,11 +142,16 @@ async def cmd_rm(d, a):
         print(f"not found on drive: {path}")
         return 1
     if not a.yes:
-        if input(f"Delete {path} permanently (also from Telegram)? [y/N] ").strip().lower() != "y":
+        if input(f"Move {path} to the trash? [y/N] ").strip().lower() != "y":
             print("cancelled.")
             return
     n = await d.delete(path)
-    print(f"deleted {n} file(s).")
+    print(f"moved {n} file(s) to the trash (restore them in the dashboard).")
+
+
+async def cmd_empty_trash(d, a):
+    n = await d.empty_trash()
+    print(f"deleted {n} file(s) for good.")
 
 
 async def cmd_info(d, a):
@@ -256,6 +262,7 @@ def build_parser():
     s.add_argument("-y", "--yes", action="store_true")
     s.set_defaults(func=cmd_rm)
 
+    sub.add_parser("empty-trash", help="delete everything in the trash for good").set_defaults(func=cmd_empty_trash)
     sub.add_parser("info", help="show account and drive status").set_defaults(func=cmd_info)
     sub.add_parser("backup", help="back up the index to the channel").set_defaults(func=cmd_backup)
     s = sub.add_parser("restore-index", help="restore the index from the newest backup in the channel")

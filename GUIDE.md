@@ -131,25 +131,73 @@ Add `SYNC_FOLDERS` to `config.py` and restart. Every 10 seconds:
 | Add or change a file in the PC folder | Uploads it to the drive folder |
 | Add or change a file on the drive (dashboard, S:, Telegram) | Downloads it to the PC folder |
 | Rename or move a file on either side | Renames it on the other side, without uploading again |
-| Delete on the PC | Moves the drive copy to `/SpiDrive Trash` on the drive |
+| Delete on the PC | Moves the drive copy to the **Trash** (restore it in the dashboard for 30 days) |
 | Delete on the drive | Moves the PC copy to `data\sync-trash` (emptied after 30 days) |
 | Change the same file on both sides | Keeps both: your PC copy becomes `name (conflict date).ext` |
 
-Sync never deletes anything permanently. Empty `/SpiDrive Trash` yourself in the dashboard when you're sure. If the PC folder disappears (for example, an unplugged USB disk), sync pauses instead of deleting anything. Tip: syncing `/Telegram Inbox` brings everything you send from your phone straight into a folder on your PC.
+Sync never deletes anything permanently: files deleted on the PC wait in the dashboard's **Trash** for 30 days. (Older SpiDrive versions used a `/SpiDrive Trash` folder; it is still left alone by sync.) If the PC folder disappears (for example, an unplugged USB disk), sync pauses instead of deleting anything. Tip: syncing `/Telegram Inbox` brings everything you send from your phone straight into a folder on your PC.
 
-## File status (like OneDrive)
+## Trash and earlier versions
 
-The dashboard shows where each file lives, with a progress bar while it moves:
+Deleting a file or folder (in the dashboard, on drive S:, with sync or `drive.py rm`) moves it to the
+**Trash** in the sidebar. Nothing leaves Telegram yet. Open the Trash to **Restore** an item to where it
+was (if that name is taken now, it comes back as `name (2).ext`), or **Delete forever**. Items are removed
+from Telegram for good after 30 days. Right after deleting in the dashboard you can also click **Undo**.
 
-| Icon | Meaning |
+When a file is replaced (uploaded again, saved over on drive S:, or changed in a synced folder), the old
+one is kept as an **earlier version**. Click the clock button next to a file to see its versions, open
+one, or **Restore** it: it becomes the current file again, and the one it replaced becomes a version.
+SpiDrive keeps the last 10 versions of each file, each for 30 days. Change this with `TRASH_DAYS` and
+`KEEP_VERSIONS` in `config.py`. Trashed files and versions still use space in your channel until they
+are removed; the sidebar shows how much.
+
+## Photos
+
+**Photos** in the sidebar shows every photo and video on the drive, newest first, grouped by month (by
+the date the photo was taken, when the camera recorded it). Previews are small pictures SpiDrive makes
+once, so browsing does not download full-size images: photos uploaded through SpiDrive get theirs at
+upload time, older photos the first time they are shown. Videos show a preview when they were sent from
+Telegram. Previews are stored in `data\thumbs.db`, never in the channel.
+
+## Working with many files
+
+Tick the box in front of files and folders (Shift-click to pick a range, Ctrl+A for all, Esc to clear).
+The bar at the top then lets you:
+
+- **Download** them as one ZIP file. It is streamed while the files arrive from Telegram, so it starts
+  at once and works for any size. A folder's download button does the same for that folder.
+- **Move** them to another folder.
+- **Keep on this PC**: a copy is stored in `data\offline` (decrypted), so they open instantly and
+  without Telegram. Kept files show **On this PC**.
+- **Free up space**: remove those copies; the files stay in Telegram.
+- **Delete**: move them to the Trash.
+
+## Search
+
+Search finds files in all folders. Persian spellings match each other: ي and ی, ك and ک, ۱۲ and 12,
+with or without the half-space (so "میخواهم" finds "می‌خواهم"). Add filters, alone or with words
+(click **?** next to the search box for the list):
+
+| Filter | Example |
 |---|---|
-| Cloud | **Online only.** Only in Telegram; opens online, takes no space on this PC. |
-| Green check outline | **On this PC.** In a synced folder, or recently opened from drive S: (freed after an hour). |
-| Green filled check | **Always on this PC.** You chose *Keep on this PC*; opens instantly, also offline. |
-| Turning arrows | **Uploading / Downloading** with a live percentage and progress bar. |
+| `type:` video, image, audio, doc, archive, other | `type:video` |
+| `size:` | `size:>1gb`, `size:<500mb`, `size:10mb..1gb` |
+| `after:` `before:` `date:` | `after:2026-01`, `before:2026-03-15`, `date:2026-02`, `after:30d`, Persian years `after:1404-07` |
+| `in:` folder name contains | `in:Videos` |
+| `ext:` | `ext:pdf` |
+| `"…"` | `"annual report"` (words next to each other) |
 
-Hover a file (or folder) for **Keep on this PC** or **Free up space**. Kept files live in
-`data\offline` (decrypted), and *On this PC* in the sidebar shows how much space they take.
+Dates are when a photo was taken, otherwise the file's date.
+
+## Player
+
+- Music plays the **next track** in the folder by itself.
+- Videos (and audio longer than 10 minutes) **remember where you stopped**. Reopen one to continue;
+  click *Start over* to begin again.
+- A video shows **subtitles** from a `.srt` or `.vtt` file with the same name in the same folder:
+  `Movie.srt`, `Movie.fa.srt`, `Movie.en.srt`... With several, the one in your browser's language (else
+  Persian) is shown; pick another in the player's ⋮ menu. Old Persian subtitles saved as Windows-1256 are
+  read correctly.
 
 ## Sharing a file
 

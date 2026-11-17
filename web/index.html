@@ -143,7 +143,9 @@ tr.row:hover .acts,.card:hover .acts{opacity:1}
 #viewer .btn:hover{background:rgba(255,255,255,.16)}
 #viewer .stage{flex:1;min-height:0;display:grid;place-items:center;position:relative;padding:0 64px 24px}
 #viewer .stage img,#viewer .stage video{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;background:#000}
-#viewer .stage video{width:100%}
+#viewer .stage video{width:100%;height:100%}
+#viewer .stage{grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
+a.btn{text-decoration:none;color:inherit}
 #viewer .audio{display:grid;gap:18px;justify-items:center;width:min(520px,100%)}
 #viewer .audio .art{width:150px;height:150px;border-radius:20px;background:rgba(255,255,255,.07);display:grid;place-items:center;color:var(--k-audio)}
 #viewer .audio audio{width:100%}
@@ -173,8 +175,68 @@ tr.row:hover .acts,.card:hover .acts{opacity:1}
 #restarting{position:fixed;inset:0;background:var(--bg);z-index:70;display:none;place-items:center;font-size:16px}
 #restarting.on{display:grid}
 .spin-r{width:20px;height:20px;border:3px solid var(--panel-2);border-top-color:var(--accent);border-radius:50%;display:inline-block;vertical-align:middle;margin-right:10px;animation:sr 1s linear infinite}@keyframes sr{to{transform:rotate(360deg)}}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:9px;opacity:0;transition:.2s;z-index:60;pointer-events:none;max-width:90vw}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:9px;opacity:0;transition:.2s;z-index:60;pointer-events:none;max-width:90vw;display:flex;gap:14px;align-items:center}
 #toast.on{opacity:1;transform:translateX(-50%)}
+#toast.act{pointer-events:auto}
+#toast button{background:none;border:0;color:var(--accent);font-weight:600;cursor:pointer;padding:0}
+
+/* views in the sidebar */
+.views{display:grid;gap:2px;margin:-6px -8px 0}
+.views a{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:8px;color:var(--text);text-decoration:none;cursor:pointer}
+.views a:hover{background:var(--panel-2)}
+.views a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.views svg{width:18px;height:18px;flex:none}
+.views em{margin-left:auto;font-style:normal;color:var(--muted);font-size:12px;font-weight:400}
+
+/* selection */
+th.sel,td.sel{width:34px;padding-right:0}
+.cb{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;margin:0;vertical-align:middle}
+.card .cb{position:absolute;top:8px;left:8px;z-index:2;opacity:0}
+.card:hover .cb,.selecting .card .cb,.card.picked .cb{opacity:1}
+tr.picked td{background:var(--accent-soft)!important}
+.card.picked{outline:2px solid var(--accent);outline-offset:-2px}
+#selbar{display:none;align-items:center;gap:8px;flex:1;flex-wrap:wrap;min-height:38px}
+#selbar b{margin-right:6px}
+#selbar svg{width:16px;height:16px;flex:none}
+.top.selmode>:not(#selbar){display:none!important}
+.top.selmode #selbar{display:flex}
+.tag.ok{color:var(--ok)}
+.ico.tn{overflow:hidden;background:var(--panel-2)}
+.ico.tn img{width:100%;height:100%;object-fit:cover}
+img[data-thumb]{opacity:0;transition:opacity .2s}
+img[data-thumb].in{opacity:1}
+
+/* photos */
+.month{font-size:15px;font-weight:600;margin:22px 0 10px;display:flex;gap:8px;align-items:baseline}
+.month small{color:var(--muted);font-weight:400;font-size:13px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:4px}
+.ph{aspect-ratio:1;background:var(--panel-2);border-radius:6px;overflow:hidden;position:relative;cursor:pointer;display:grid;place-items:center}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph .badge{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.6);color:#fff;border-radius:5px;font-size:11px;padding:1px 6px}
+.ph:hover{filter:brightness(1.06)}
+
+/* trash, versions, search help */
+.note{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:10px 14px;margin:6px 0 10px;color:var(--muted);font-size:13px}
+.btn.danger{color:var(--danger)}
+#dlg{position:fixed;inset:0;background:rgba(10,12,14,.45);z-index:46;display:none;place-items:start center;padding:60px 16px;overflow:auto}
+#dlg.on{display:grid}
+#dlg .box{width:min(560px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+#dlg header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+#dlg header b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#dlg .body{padding:6px 18px 16px}
+.vrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
+.vrow:last-child{border-bottom:0}
+.vrow div{flex:1;min-width:0}
+.vrow small{display:block;color:var(--muted)}
+#qHelp{position:absolute;top:44px;left:0;right:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:12px 14px;z-index:20;display:none;font-size:13px}
+#qHelp.on{display:block}
+#qHelp code{background:var(--panel-2);border-radius:5px;padding:1px 6px;cursor:pointer;font:12.5px ui-monospace,Consolas,monospace;display:inline-block;margin:2px 0}
+#qHelp div{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;align-items:baseline;margin-top:6px}
+#qHelp span{color:var(--muted)}
+.qerr{color:var(--warn);font-size:13px;margin-left:8px}
+#vResume{display:none}
+#vResume.on{display:inline-flex}
+video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:rgba(0,0,0,.62)}
 
 @media (max-width:820px){
   .app{grid-template-columns:1fr}
@@ -194,6 +256,11 @@ tr.row:hover .acts,.card:hover .acts{opacity:1}
       <div style="flex:1"><b>SpiDrive</b><small id="chan">connecting…</small></div>
       <button class="btn icon sm ghost" id="bSettings" title="Settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     </div>
+    <nav class="views" id="views">
+      <a data-view="drive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>My Drive</a>
+      <a data-view="photos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>Photos</a>
+      <a data-view="trash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Trash<em id="trashCount"></em></a>
+    </nav>
     <div>
       <div class="total" id="sTotal">—</div>
       <div class="sub" id="sCounts">&nbsp;</div>
@@ -214,13 +281,35 @@ tr.row:hover .acts,.card:hover .acts{opacity:1}
     <div class="top">
       <label class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" placeholder="Search all files" autocomplete="off" dir="auto">
+        <input id="q" placeholder="Search all files   (try  type:video size:>1gb after:2026-01)" autocomplete="off" dir="auto">
         <button class="btn icon sm ghost clear" id="qClear" title="Clear">✕</button>
+        <div id="qHelp">
+          Words match any spelling (ي/ی, ك/ک, ۱۲/12, with or without half-space). Click a filter to add it:
+          <div>
+            <code>type:video</code><span>video, image, audio, doc, archive, other</span>
+            <code>size:&gt;1gb</code><span>also <code>size:&lt;500mb</code> or <code>size:10mb..1gb</code></span>
+            <code>after:2026-01</code><span>also <code>before:2026-03-15</code>, <code>date:2026-02</code>, <code>after:30d</code>, Persian years <code>after:1404-07</code></span>
+            <code>in:Videos</code><span>only in folders whose name contains this</span>
+            <code>ext:pdf</code><span>file extension</span>
+            <code>"exact words"</code><span>words next to each other</span>
+          </div>
+        </div>
       </label>
+      <button class="btn icon" id="bQHelp" title="Search filters" aria-label="Search filters">?</button>
       <button class="btn" id="bFolder" title="New folder"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg><span class="lbl">New folder</span></button>
       <button class="btn" id="bUpDir" title="Upload folder"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9.5 13 2.5-2.5 2.5 2.5M12 11v6"/></svg><span class="lbl">Upload folder</span></button>
       <button class="btn primary" id="bUp" title="Upload files"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span class="lbl">Upload</span></button>
       <button class="btn icon" id="bView" title="Switch view"></button>
+      <div id="selbar">
+        <b id="selCount"></b>
+        <button class="btn sm" data-sel="zip" title="Download as one ZIP"><i data-icon="dl"></i><span class="lbl">Download</span></button>
+        <button class="btn sm" data-sel="move"><i data-icon="edit"></i><span class="lbl">Move</span></button>
+        <button class="btn sm" data-sel="keep" title="Keep a copy on this PC, so it opens without Telegram">Keep on this PC</button>
+        <button class="btn sm" data-sel="unkeep" title="Remove the copies on this PC; files stay in Telegram">Free up space</button>
+        <button class="btn sm danger" data-sel="delete"><i data-icon="del"></i><span class="lbl">Delete</span></button>
+        <span style="flex:1"></span>
+        <button class="btn icon sm ghost" data-sel="clear" title="Clear selection (Esc)">✕</button>
+      </div>
       <input type="file" id="fFiles" multiple hidden>
       <input type="file" id="fDir" webkitdirectory multiple hidden>
     </div>
@@ -241,6 +330,7 @@ tr.row:hover .acts,.card:hover .acts{opacity:1}
 <div id="viewer">
   <header>
     <div class="t" id="vTitle" dir="auto"></div>
+    <button class="btn sm" id="vResume" title="Play from the beginning"></button>
     <button class="btn sm" id="vLink" title="Copy a stream link for VLC or another player">Copy link</button>
     <button class="btn sm" id="vDl">Download</button>
     <button class="btn icon sm" id="vClose" title="Close (Esc)">✕</button>
@@ -293,6 +383,7 @@ tr.row:hover .acts,.card:hover .acts{opacity:1}
     <div class="foot"><button class="btn" id="setCancel">Cancel</button><button class="btn primary" id="setSave">Save and restart</button></div>
   </div>
 </div>
+<div id="dlg" role="dialog" aria-modal="true"><div class="box"><header><b id="dlgTitle"></b><button class="btn icon sm ghost" id="dlgClose" title="Close">✕</button></header><div class="body" id="dlgBody"></div></div></div>
 <div id="restarting"><div><span class="spin-r"></span>Restarting SpiDrive…</div></div>
 <div id="toast"></div>
 
@@ -311,6 +402,7 @@ const ICONS = {
   edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   del:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  history:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
   grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
 };
 const KINDS = {image:'Photos', video:'Videos', audio:'Music', document:'Documents', archive:'Archives', other:'Other'};
@@ -322,9 +414,10 @@ const fmtSize = n => { if (n == null) return ''; const u=['B','KB','MB','GB','TB
 const fmtDate = t => t ? new Date(t*1000).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
 const fileUrl = (f, dl) => `/f/${f.id}/${encodeURIComponent(f.name)}${dl ? '?dl=1' : ''}`;
 const join = (a, b) => (a === '/' ? '' : a) + '/' + b;
-const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} }, del(k) { try { localStorage.removeItem(k); } catch {} } };
+document.querySelectorAll('[data-icon]').forEach(i => i.outerHTML = svg(i.dataset.icon));
 
-const state = { path:'/', q:'', dirs:[], files:[], view:store.get('view','list'), sort:store.get('sort','name'), asc:store.get('asc','1')==='1', version:null };
+const state = { mode:'drive', path:'/', lastPath:'/', q:'', dirs:[], files:[], view:store.get('view','list'), sort:store.get('sort','name'), asc:store.get('asc','1')==='1', version:null, sel:new Map(), lastSel:null, trashDays:30 };
 
 async function api(url, body) {
   const opt = body === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) };
@@ -334,24 +427,67 @@ async function api(url, body) {
   return j;
 }
 let toastT;
-function toast(msg) { const t=$('#toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 3200); }
+function toast(msg, action) {
+  const t = $('#toast'); t.textContent = msg; t.classList.toggle('act', !!action);
+  if (action) { const b = document.createElement('button'); b.textContent = action.label; b.onclick = () => { t.classList.remove('on'); action.fn(); }; t.appendChild(b); }
+  t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), action ? 6000 : 3200);
+}
 
 /* ---------- navigation ---------- */
+// #<encoded path> = a folder, #photos = Photos timeline, #trash = Trash
 function pathFromHash() { try { return decodeURIComponent(location.hash.slice(1)) || '/'; } catch { return '/'; } }
-function go(path) { if (state.q) { state.q=''; $('#q').value=''; syncClear(); } if (pathFromHash() === path) load(); else location.hash = encodeURIComponent(path); }
-window.addEventListener('hashchange', () => { state.path = pathFromHash(); state.q=''; $('#q').value=''; syncClear(); load(); });
+function route() { const h = location.hash.slice(1); return h === 'photos' || h === 'trash' ? { mode: h, path: '/' } : { mode: 'drive', path: pathFromHash() }; }
+function clearSearch() { state.q = ''; $('#q').value = ''; syncClear(); }
+function go(path) { if (state.q) clearSearch(); if (state.mode === 'drive' && pathFromHash() === path) load(); else location.hash = encodeURIComponent(path); }
+function goView(v) { if (state.q) clearSearch(); if (v === 'drive') return go(state.lastPath || '/'); if (location.hash.slice(1) === v) load(); else location.hash = v; }
+window.addEventListener('hashchange', () => {
+  const r = route(); state.mode = r.mode; state.path = r.path; if (r.mode === 'drive') state.lastPath = r.path;
+  clearSearch(); clearSel(); load();
+});
+$('#views').addEventListener('click', e => { const a = e.target.closest('[data-view]'); if (a) goView(a.dataset.view); });
 
 async function load() {
+  document.querySelectorAll('#views a').forEach(a => a.classList.toggle('on', !state.q && a.dataset.view === state.mode));
+  const listing = state.q || state.mode === 'drive';
+  ['#bFolder', '#bUpDir', '#bUp', '#bView'].forEach(s => $(s).style.display = listing && !state.q ? '' : 'none');
+  $('#bView').style.display = listing ? '' : 'none';
   try {
-    const d = state.q ? await api('/api/search?q=' + encodeURIComponent(state.q))
-                      : await api('/api/list?path=' + encodeURIComponent(state.path));
-    state.dirs = d.dirs || []; state.files = d.files || [];
+    if (state.q) {
+      const d = await api('/api/search?q=' + encodeURIComponent(state.q));
+      state.dirs = []; state.files = d.files || []; state.qErrors = d.errors || [];
+    } else if (state.mode === 'photos') return loadPhotos(true);
+    else if (state.mode === 'trash') return loadTrash();
+    else {
+      const d = await api('/api/list?path=' + encodeURIComponent(state.path));
+      state.dirs = d.dirs || []; state.files = d.files || [];
+    }
     render();
   } catch (e) {
-    if (!state.q && state.path !== '/') { toast(e.message); go('/'); }
+    if (!state.q && state.mode === 'drive' && state.path !== '/') { toast(e.message); go('/'); }
     else { $('#content').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }
 }
+
+/* ---------- previews: loaded a few at a time, only when scrolled into view ---------- */
+const thumbs = { queue: [], active: 0, max: 3 };
+const thumbObs = new IntersectionObserver(list => {
+  for (const en of list) if (en.isIntersecting) { thumbObs.unobserve(en.target); thumbs.queue.push(en.target); }
+  pumpThumbs();
+}, { rootMargin: '400px' });
+function pumpThumbs() {
+  while (thumbs.active < thumbs.max && thumbs.queue.length) {
+    const img = thumbs.queue.shift();
+    if (!img.isConnected) continue;
+    thumbs.active++;
+    const done = () => { thumbs.active--; pumpThumbs(); };
+    img.onload = () => { img.classList.add('in'); done(); };
+    img.onerror = () => { const t = document.createElement('template'); t.innerHTML = img.dataset.fallback || ''; img.replaceWith(t.content); done(); };
+    img.src = img.dataset.thumb;
+  }
+}
+function observeThumbs() { document.querySelectorAll('#content img[data-thumb]:not([src])').forEach(i => thumbObs.observe(i)); }
+const thumbImg = (f, fallback) => `<img data-thumb="/t/${f.id}?v=${f.size}-${Math.round(f.mtime)}" data-fallback="${esc(fallback)}" alt="">`;
+const hasThumb = f => (f.kind === 'image' || f.kind === 'video') && ready(f);
 
 /* ---------- rendering ---------- */
 function sorted() {
@@ -361,10 +497,11 @@ function sorted() {
   const dirs = [...state.dirs].sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
   return { dirs, files };
 }
+function rowItems() { const { dirs, files } = sorted(); return [...dirs.map(d => ({ key: 'd:' + d.path, path: d.path, dir: d })), ...files.map(f => ({ key: 'f:' + f.path, path: f.path, file: f }))]; }
 
 function render() {
   const c = $('#crumbs');
-  if (state.q) c.innerHTML = `<a>Search results for “${esc(state.q)}”</a>`;
+  if (state.q) c.innerHTML = `<a>${state.files.length} result${state.files.length === 1 ? '' : 's'} for “${esc(state.q)}”</a>` + (state.qErrors || []).map(x => `<span class="qerr">${esc(x)}</span>`).join('');
   else {
     const parts = state.path.split('/').filter(Boolean);
     let acc = '', html = `<a data-go="/">My Drive</a>`;
@@ -377,36 +514,106 @@ function render() {
   const el = $('#content');
   if (!dirs.length && !files.length) {
     el.innerHTML = `<div class="empty">${svg(state.q ? 'other' : 'folder', 1.5)}<div>${state.q ? 'No files match your search.' : 'This folder is empty. Drop files here or use Upload.'}</div></div>`;
-    return;
+    return updateSel();
   }
-  const acts = (i, isDir) => `<div class="acts">${isDir ? '' : `<button data-act="dl" data-i="${i}" title="Download">${svg('dl')}</button><button data-act="share" data-i="${i}" title="Send to someone on Telegram">${svg('share')}</button>`}<button data-act="mv" data-${isDir?'d':'i'}="${i}" title="Rename or move">${svg('edit')}</button><button class="del" data-act="rm" data-${isDir?'d':'i'}="${i}" title="Delete">${svg('del')}</button></div>`;
-  const tags = f => (f.encrypted ? '<span class="tag" title="Encrypted">AES</span>' : '') + (f.status === 'pending' ? '<span class="tag" title="Saved on this PC, going to Telegram">uploading…</span>' : f.status !== 'complete' ? '<span class="tag warn">incomplete</span>' : '') + (f.origin === 'telegram' ? '<span class="tag">from Telegram</span>' : '');
+  const nd = dirs.length;
+  const cb = (k, n) => `<input type="checkbox" class="cb" data-n="${n}" aria-label="Select">`;
+  const acts = (i, isDir) => `<div class="acts"><button data-act="dl" data-${isDir?'d':'i'}="${i}" title="${isDir ? 'Download as ZIP' : 'Download'}">${svg('dl')}</button>${isDir ? '' : `<button data-act="share" data-i="${i}" title="Send to someone on Telegram">${svg('share')}</button><button data-act="ver" data-i="${i}" title="Earlier versions">${svg('history')}</button>`}<button data-act="mv" data-${isDir?'d':'i'}="${i}" title="Rename or move">${svg('edit')}</button><button class="del" data-act="rm" data-${isDir?'d':'i'}="${i}" title="Move to Trash">${svg('del')}</button></div>`;
+  const tags = f => (f.encrypted ? '<span class="tag" title="Encrypted">AES</span>' : '') + (f.status === 'pending' ? '<span class="tag" title="Saved on this PC, going to Telegram">uploading…</span>' : f.status !== 'complete' ? '<span class="tag warn">incomplete</span>' : '') + (f.keep ? (f.local ? '<span class="tag ok" title="Kept on this PC: opens without Telegram">On this PC</span>' : '<span class="tag" title="Downloading a copy to keep on this PC">keeping…</span>') : '') + (f.origin === 'telegram' ? '<span class="tag">from Telegram</span>' : '');
   if (state.view === 'grid') {
     el.innerHTML = '<div class="grid">' +
-      dirs.map((d, i) => `<div class="card" data-d="${i}"><div class="thumb">${folderIco()}</div><div class="cap"><div dir="auto">${esc(d.name)}</div><small>Folder</small></div>${acts(i, true)}</div>`).join('') +
-      files.map((f, i) => `<div class="card" data-i="${i}"><div class="thumb">${f.kind === 'image' && ready(f) && f.size < 25e6 ? `<img loading="lazy" src="${fileUrl(f)}" alt="">` : kindIco(f.kind)}</div><div class="cap"><div dir="auto" title="${esc(f.name)}">${esc(f.name)}</div><small>${fmtSize(f.size)}</small></div>${acts(i, false)}</div>`).join('') + '</div>';
+      dirs.map((d, i) => `<div class="card" data-d="${i}" data-k="${esc('d:' + d.path)}">${cb('d', i)}<div class="thumb">${folderIco()}</div><div class="cap"><div dir="auto">${esc(d.name)}</div><small>Folder</small></div>${acts(i, true)}</div>`).join('') +
+      files.map((f, i) => `<div class="card" data-i="${i}" data-k="${esc('f:' + f.path)}">${cb('f', nd + i)}<div class="thumb">${hasThumb(f) ? thumbImg(f, kindIco(f.kind)) : kindIco(f.kind)}</div><div class="cap"><div dir="auto" title="${esc(f.name)}">${esc(f.name)}</div><small>${fmtSize(f.size)}${f.keep && f.local ? ' · on this PC' : ''}</small></div>${acts(i, false)}</div>`).join('') + '</div>';
   } else {
     const arrow = k => state.sort === k ? (state.asc ? ' ↑' : ' ↓') : '';
-    el.innerHTML = `<table><thead><tr><th data-sort="name">Name${arrow('name')}</th>${state.q ? '<th class="hide-sm">Folder</th>' : ''}<th class="num" data-sort="size">Size${arrow('size')}</th><th class="hide-sm" data-sort="date">Added${arrow('date')}</th><th></th></tr></thead><tbody>` +
-      dirs.map((d, i) => `<tr class="row" data-d="${i}"><td><div class="name">${folderIco()}<span dir="auto">${esc(d.name)}</span></div></td><td class="dim num">—</td><td class="dim hide-sm"></td><td>${acts(i, true)}</td></tr>`).join('') +
-      files.map((f, i) => `<tr class="row" data-i="${i}"><td><div class="name">${kindIco(f.kind)}<span dir="auto" title="${esc(f.name)}">${esc(f.name)}</span>${tags(f)}</div></td>${state.q ? `<td class="dim hide-sm" dir="auto">${esc(f.folder)}</td>` : ''}<td class="dim num">${fmtSize(f.size)}</td><td class="dim hide-sm">${fmtDate(f.created)}</td><td>${acts(i, false)}</td></tr>`).join('') +
+    el.innerHTML = `<table><thead><tr><th class="sel"><input type="checkbox" class="cb" id="selAll" aria-label="Select all"></th><th data-sort="name">Name${arrow('name')}</th>${state.q ? '<th class="hide-sm">Folder</th>' : ''}<th class="num" data-sort="size">Size${arrow('size')}</th><th class="hide-sm" data-sort="date">Added${arrow('date')}</th><th></th></tr></thead><tbody>` +
+      dirs.map((d, i) => `<tr class="row" data-d="${i}" data-k="${esc('d:' + d.path)}"><td class="sel">${cb('d', i)}</td><td><div class="name">${folderIco()}<span dir="auto">${esc(d.name)}</span></div></td>${state.q ? '<td class="hide-sm"></td>' : ''}<td class="dim num">—</td><td class="dim hide-sm"></td><td>${acts(i, true)}</td></tr>`).join('') +
+      files.map((f, i) => `<tr class="row" data-i="${i}" data-k="${esc('f:' + f.path)}"><td class="sel">${cb('f', nd + i)}</td><td><div class="name">${f.kind === 'image' && ready(f) ? `<div class="ico tn">${thumbImg(f, kindIco(f.kind))}</div>` : kindIco(f.kind)}<span dir="auto" title="${esc(f.name)}">${esc(f.name)}</span>${tags(f)}</div></td>${state.q ? `<td class="dim hide-sm" dir="auto">${esc(f.folder)}</td>` : ''}<td class="dim num">${fmtSize(f.size)}</td><td class="dim hide-sm">${fmtDate(f.created)}</td><td>${acts(i, false)}</td></tr>`).join('') +
       '</tbody></table>';
   }
+  observeThumbs(); updateSel();
 }
+
+/* ---------- selection ---------- */
+function clearSel() { state.sel.clear(); state.lastSel = null; updateSel(); }
+function updateSel() {
+  const keys = new Set(rowItems().map(x => x.key));
+  for (const k of [...state.sel.keys()]) if (!keys.has(k)) state.sel.delete(k);
+  const n = state.sel.size;
+  document.querySelectorAll('#content [data-k]').forEach(el => {
+    const on = state.sel.has(el.dataset.k);
+    el.classList.toggle('picked', on);
+    const c = el.querySelector('.cb'); if (c) c.checked = on;
+  });
+  const all = $('#selAll'); if (all) { all.checked = n > 0 && n === keys.size; all.indeterminate = n > 0 && n < keys.size; }
+  $('#content').classList.toggle('selecting', n > 0);
+  $('.top').classList.toggle('selmode', n > 0);
+  $('#selCount').textContent = `${n} selected`;
+}
+function toggleSel(n, shift) {
+  const list = rowItems();
+  if (shift && state.lastSel != null) {
+    const on = !state.sel.has(list[n].key);
+    const [a, b] = [Math.min(n, state.lastSel), Math.max(n, state.lastSel)];
+    for (let i = a; i <= b; i++) on ? state.sel.set(list[i].key, list[i]) : state.sel.delete(list[i].key);
+  } else if (state.sel.has(list[n].key)) state.sel.delete(list[n].key);
+  else state.sel.set(list[n].key, list[n]);
+  state.lastSel = n; updateSel();
+}
+function selectAll() { for (const x of rowItems()) state.sel.set(x.key, x); updateSel(); }
+function zipDownload(paths) {
+  const f = document.createElement('form'); f.method = 'POST'; f.action = '/api/zip'; f.style.display = 'none';
+  const i = document.createElement('input'); i.type = 'hidden'; i.name = 'paths'; i.value = JSON.stringify(paths);
+  f.appendChild(i); document.body.appendChild(f); f.submit(); f.remove();
+  toast('Making the ZIP… the download starts in a moment and fills as files arrive from Telegram.');
+}
+$('#selbar').addEventListener('click', async e => {
+  const b = e.target.closest('[data-sel]'); if (!b) return;
+  const items = [...state.sel.values()], paths = items.map(x => x.path), act = b.dataset.sel;
+  try {
+    if (act === 'clear') return clearSel();
+    if (act === 'zip') { if (items.length === 1 && items[0].file) download(items[0].file); else zipDownload(paths); return; }
+    if (act === 'move') {
+      const dest = prompt(`Move ${items.length} item${items.length === 1 ? '' : 's'} to which folder? (for example /Videos)`, state.q ? '/' : state.path);
+      if (!dest) return;
+      const r = await api('/api/batch', { action: 'move', paths, dest: dest.startsWith('/') ? dest : join(state.path, dest) });
+      toast(`Moved ${r.done}` + (r.errors.length ? ` · ${r.errors.length} not moved: ${r.errors[0]}` : ''));
+    } else if (act === 'delete') {
+      if (!confirm(`Move ${items.length} item${items.length === 1 ? '' : 's'} to the Trash?\nYou can restore them for ${state.trashDays} days.`)) return;
+      const r = await api('/api/batch', { action: 'delete', paths });
+      toast(`Moved ${r.done} file${r.done === 1 ? '' : 's'} to the Trash` + (r.errors.length ? ` · ${r.errors[0]}` : ''), { label: 'Open Trash', fn: () => goView('trash') });
+    } else {
+      const r = await api('/api/batch', { action: act, paths });
+      toast(act === 'keep' ? `Keeping ${r.done} file${r.done === 1 ? '' : 's'} on this PC. Progress shows in the panel.` : `Freed up space for ${r.done} file${r.done === 1 ? '' : 's'}. They stay in Telegram.`);
+      if (act === 'keep') { up.dismissed = false; setTimeout(poll, 800); setTimeout(refresh, 3000); }
+    }
+    clearSel(); refresh();
+  } catch (err) { toast(err.message); }
+});
 
 $('#crumbs').addEventListener('click', e => { const a = e.target.closest('[data-go]'); if (a) go(a.dataset.go); });
 $('#content').addEventListener('click', async e => {
+  if (state.mode === 'photos' && !state.q) return photoClick(e);
+  if (state.mode === 'trash' && !state.q) return trashClick(e);
+  if (e.target.id === 'selAll') { e.target.checked ? selectAll() : clearSel(); return; }
   const th = e.target.closest('th[data-sort]');
   if (th) { const k = th.dataset.sort; state.asc = state.sort === k ? !state.asc : true; state.sort = k; store.set('sort', k); store.set('asc', state.asc ? '1' : '0'); render(); return; }
+  const box = e.target.closest('.cb[data-n]');
+  if (box) { toggleSel(+box.dataset.n, e.shiftKey); return; }
   const b = e.target.closest('[data-act]');
   const holder = b || e.target.closest('[data-i],[data-d]');
   if (!holder) return;
   const dir = holder.dataset.d !== undefined ? sorted().dirs[+holder.dataset.d] : null;
   const file = holder.dataset.i !== undefined ? state.shown[+holder.dataset.i] : null;
+  if (!b && (state.sel.size || e.ctrlKey || e.metaKey || e.shiftKey)) {     // selecting: clicks pick items
+    const n = dir ? +holder.dataset.d : sorted().dirs.length + +holder.dataset.i;
+    return toggleSel(n, e.shiftKey);
+  }
   const act = b ? b.dataset.act : 'open';
   try {
     if (act === 'open') dir ? go(dir.path) : openFile(file);
-    else if (act === 'dl') download(file);
+    else if (act === 'dl') dir ? zipDownload([dir.path]) : download(file);
+    else if (act === 'ver') openVersions(file);
     else if (act === 'share') {
       const to = prompt(`Send “${file.name}” to whom on Telegram?\n\nType their @username, a phone number saved in your contacts, or  me  for your Saved Messages.`, store.get('lastShare', ''));
       if (!to || !to.trim()) return;
@@ -423,32 +630,133 @@ $('#content').addEventListener('click', async e => {
       toast('Moved'); refresh();
     } else if (act === 'rm') {
       const p = dir ? dir.path : file.path;
-      if (!confirm(`Delete “${p}”${dir ? ' and everything in it' : ''}?\nIt is also removed from the Telegram channel.`)) return;
-      const r = await api('/api/delete', { path: p });
-      toast(`Deleted ${r.deleted} file${r.deleted === 1 ? '' : 's'}`); refresh();
+      if (!confirm(`Move “${p}”${dir ? ' and everything in it' : ''} to the Trash?\nYou can restore it for ${state.trashDays} days.`)) return;
+      await api('/api/delete', { path: p });
+      toast('Moved to the Trash', { label: 'Undo', fn: () => undoDelete(p) }); refresh();
     }
   } catch (err) { toast(err.message); }
 });
+async function undoDelete(path) {
+  try {
+    const t = await api('/api/trash');
+    const it = t.items.find(x => x.path === path);
+    if (!it) return toast('Already gone from the Trash.');
+    await api('/api/trash/restore', { ids: [it.id] }); toast('Restored'); refresh();
+  } catch (e) { toast(e.message); }
+}
 
 function download(f) { const a = document.createElement('a'); a.href = fileUrl(f, true); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); }
 function ready(f) { return f.status === 'complete' || f.status === 'pending'; }
-function openFile(f) {
+function openFile(f, list) {
   if (!ready(f)) return toast('This upload was interrupted. Upload the file again.');
-  if (['image','video','audio'].includes(f.kind)) return openViewer(f);
+  if (['image','video','audio'].includes(f.kind)) return openViewer(f, list);
   if (/\.(pdf|txt|md|srt|csv)$/i.test(f.name)) return window.open(fileUrl(f), '_blank');
   download(f);
 }
 
-/* ---------- viewer ---------- */
-const viewer = { list: [], i: 0 };
-function openViewer(f) {
-  viewer.list = state.shown.filter(x => ['image','video','audio'].includes(x.kind) && ready(x));
+/* ---------- photos timeline ---------- */
+const photos = { list: [], total: 0, busy: false };
+async function loadPhotos(reset) {
+  if (photos.busy) return; photos.busy = true;
+  try {
+    if (reset) photos.list = [];
+    const r = await api(`/api/photos?offset=${photos.list.length}&limit=800`);
+    photos.list.push(...r.files); photos.total = r.total;
+    renderPhotos();
+  } catch (e) { $('#content').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  finally { photos.busy = false; }
+}
+function renderPhotos() {
+  $('#crumbs').innerHTML = `<a>Photos</a><span class="sep">·</span><span class="sub">${photos.total} photo${photos.total === 1 ? '' : 's'} and video${photos.total === 1 ? '' : 's'}, newest first</span>`;
+  if (!photos.list.length) { $('#content').innerHTML = `<div class="empty">${svg('image', 1.5)}<div>No photos yet. Photos and videos from any folder appear here, grouped by month.</div></div>`; return; }
+  let html = '', month = null, group = [];
+  const flush = () => { if (group.length) html += `<h3 class="month">${esc(month)}<small>${group.length}</small></h3><div class="pgrid">${group.join('')}</div>`; group = []; };
+  photos.list.forEach((f, i) => {
+    const m = new Date(f.date * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+    if (m !== month) { flush(); month = m; }
+    group.push(`<div class="ph" data-p="${i}" title="${esc(f.name)} · ${esc(fmtDate(f.date))}">${thumbImg(f, kindIco(f.kind))}${f.kind === 'video' ? '<span class="badge">▶</span>' : ''}</div>`);
+  });
+  flush();
+  if (photos.list.length < photos.total) html += '<div id="morePhotos" class="empty">Loading more…</div>';
+  $('#content').innerHTML = html;
+  observeThumbs();
+  const more = $('#morePhotos');
+  if (more) new IntersectionObserver((en, obs) => { if (en[0].isIntersecting) { obs.disconnect(); loadPhotos(false); } }, { rootMargin: '600px' }).observe(more);
+}
+function photoClick(e) {
+  const t = e.target.closest('[data-p]'); if (!t) return;
+  openFile(photos.list[+t.dataset.p], photos.list.filter(ready));
+}
+
+/* ---------- trash ---------- */
+const trash = { items: [], days: 30 };
+async function loadTrash() {
+  try { const r = await api('/api/trash'); trash.items = r.items; trash.days = r.days; renderTrash(); }
+  catch (e) { $('#content').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function renderTrash() {
+  $('#crumbs').innerHTML = '<a>Trash</a>';
+  const note = `<div class="note"><span>Deleted files stay here for ${trash.days} days, then they are removed from Telegram for good. Replaced files keep their old versions too: use <b>Earlier versions</b> on a file.</span>${trash.items.length ? '<button class="btn sm danger" data-t="empty">Empty Trash</button>' : ''}</div>`;
+  if (!trash.items.length) { $('#content').innerHTML = note + `<div class="empty">${svg('del', 1.5)}<div>The Trash is empty.</div></div>`; return; }
+  const left = it => { const d = Math.max(0, Math.ceil((it.expires - Date.now() / 1000) / 86400)); return d <= 1 ? 'today' : `${d} days`; };
+  $('#content').innerHTML = note + `<table><thead><tr><th>Name</th><th class="hide-sm">Was in</th><th class="hide-sm">Deleted</th><th class="num">Size</th><th class="hide-sm">Removed in</th><th></th></tr></thead><tbody>` +
+    trash.items.map((it, i) => `<tr class="row" data-t-i="${i}"><td><div class="name">${it.is_dir ? folderIco() : kindIco(kindOf(it.name))}<span dir="auto" title="${esc(it.name)}">${esc(it.name || '/')}</span>${it.is_dir ? `<span class="tag">${it.files} file${it.files === 1 ? '' : 's'}</span>` : ''}</div></td><td class="dim hide-sm" dir="auto">${esc(it.folder)}</td><td class="dim hide-sm">${fmtDate(it.deleted)}</td><td class="dim num">${fmtSize(it.bytes)}</td><td class="dim hide-sm">${left(it)}</td><td style="text-align:right;white-space:nowrap"><button class="btn sm" data-t="restore" data-i="${i}">Restore</button> <button class="btn sm ghost danger" data-t="purge" data-i="${i}" title="Delete for good">Delete forever</button></td></tr>`).join('') + '</tbody></table>';
+}
+async function trashClick(e) {
+  const b = e.target.closest('[data-t]'); if (!b) return;
+  const it = trash.items[+b.dataset.i];
+  try {
+    if (b.dataset.t === 'restore') {
+      const r = await api('/api/trash/restore', { ids: [it.id] });
+      if (r.errors.length) toast(r.errors[0]);
+      else toast(r.restored.length === 1 ? `Restored to ${r.restored[0]}` : `Restored ${r.restored.length} files`, { label: 'Show', fn: () => go(it.is_dir ? it.path : it.folder) });
+    } else if (b.dataset.t === 'purge') {
+      if (!confirm(`Delete “${it.name}” for good? It is removed from Telegram and cannot be restored.`)) return;
+      await api('/api/trash/delete', { ids: [it.id] }); toast('Deleted for good');
+    } else if (b.dataset.t === 'empty') {
+      if (!confirm(`Delete all ${trash.items.length} item${trash.items.length === 1 ? '' : 's'} in the Trash for good? They are removed from Telegram and cannot be restored.`)) return;
+      const r = await api('/api/trash/empty', {}); toast(`Deleted ${r.deleted} file${r.deleted === 1 ? '' : 's'} for good`);
+    }
+    refresh();
+  } catch (err) { toast(err.message); }
+}
+const kindOf = name => { const x = (name.split('.').pop() || '').toLowerCase(); return /^(jpe?g|png|gif|webp|bmp|heic|avif|svg)$/.test(x) ? 'image' : /^(mp4|mkv|webm|mov|avi|m4v|ts)$/.test(x) ? 'video' : /^(mp3|m4a|flac|ogg|opus|wav|aac)$/.test(x) ? 'audio' : /^(zip|rar|7z|tar|gz|bz2|xz|iso)$/.test(x) ? 'archive' : /^(pdf|docx?|xlsx?|pptx?|txt|md|csv|odt|rtf|epub|srt)$/.test(x) ? 'document' : 'other'; };
+
+/* ---------- versions ---------- */
+async function openVersions(f) {
+  let r;
+  try { r = await api('/api/versions?path=' + encodeURIComponent(f.path)); } catch (e) { return toast(e.message); }
+  $('#dlgTitle').textContent = 'Earlier versions of ' + f.name;
+  const cur = r.current;
+  $('#dlgBody').innerHTML = `<div class="vrow"><div><b>Current version</b><small>modified ${esc(fmtDate(cur.mtime))} · ${fmtSize(cur.size)}</small></div></div>` +
+    (r.versions.length ? r.versions.map((v, i) => `<div class="vrow"><div>Replaced ${esc(fmtDate(v.replaced))}<small>modified ${esc(fmtDate(v.mtime))} · ${fmtSize(v.size)}</small></div><a class="btn sm" href="/f/${v.file_id}/${encodeURIComponent(f.name)}" target="_blank" rel="noopener">Open</a><button class="btn sm" data-v-restore="${v.id}">Restore</button></div>`).join('')
+      : `<p class="sub">No earlier versions. When this file is replaced (from the dashboard, the drive or sync), the old one is kept here for ${state.trashDays} days.</p>`);
+  $('#dlgBody').onclick = async e => {
+    const b = e.target.closest('[data-v-restore]'); if (!b) return;
+    try { await api('/api/trash/restore', { ids: [+b.dataset.vRestore] }); toast('That version is the current one again. The one it replaced is kept as a version.'); refresh(); openVersions(f); }
+    catch (err) { toast(err.message); }
+  };
+  $('#dlg').classList.add('on');
+}
+function closeDlg() { $('#dlg').classList.remove('on'); }
+$('#dlgClose').onclick = closeDlg;
+$('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeDlg(); });
+
+/* ---------- viewer and player ---------- */
+const viewer = { list: [], i: 0, save: null };
+const posKey = f => 'pos:' + f.path + ':' + f.size;
+const fmtTime = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+function openViewer(f, list) {
+  viewer.list = (list || state.shown).filter(x => ['image','video','audio'].includes(x.kind) && ready(x));
   viewer.i = Math.max(0, viewer.list.indexOf(f));
   $('#viewer').classList.add('on'); showViewer();
 }
+function leaveMedia() { if (viewer.save) viewer.save(); viewer.save = null; $('#vResume').classList.remove('on'); }
 function showViewer() {
+  leaveMedia();
   const f = viewer.list[viewer.i], st = $('#vStage');
-  $('#vTitle').textContent = `${f.name}  ·  ${fmtSize(f.size)}`;
+  const audios = viewer.list.filter(x => x.kind === 'audio');
+  $('#vTitle').textContent = `${f.name}  ·  ${fmtSize(f.size)}` + (f.kind === 'audio' && audios.length > 1 ? `  ·  ${audios.indexOf(f) + 1} / ${audios.length}` : '');
   const many = viewer.list.length > 1;
   const nav = many ? `<button class="btn icon nav prev" data-v="-1">‹</button><button class="btn icon nav next" data-v="1">›</button>` : '';
   const url = fileUrl(f);
@@ -462,11 +770,75 @@ function showViewer() {
   else if (f.kind === 'video') st.innerHTML = `<video src="${url}" controls autoplay playsinline preload="metadata"></video>${nav}`;
   else st.innerHTML = `<div class="audio"><div class="art">${svg('audio', 1.5).replace('<svg', '<svg width="64" height="64"')}</div><div dir="auto">${esc(f.name)}</div><audio src="${url}" controls autoplay></audio></div>${nav}`;
   const media = st.querySelector('video,audio');
-  if (media) media.addEventListener('error', () => {
+  if (!media) return;
+  media.addEventListener('error', () => {
     st.innerHTML = `<div class="msg">Your browser can't play this format (for example MKV with AC3/DTS sound).<br>Click <b>Copy link</b> and open it in VLC: <i>Media › Open Network Stream</i>. It still streams without downloading everything.</div>${nav}`;
   });
+  rememberPosition(media, f);
+  if (f.kind === 'video') addSubtitles(media, f);
+  if (f.kind === 'audio') media.addEventListener('ended', () => {       // play the next track
+    for (let j = viewer.i + 1; j < viewer.list.length; j++) if (viewer.list[j].kind === 'audio') { viewer.i = j; return showViewer(); }
+  });
 }
-function closeViewer() { $('#viewer').classList.remove('on'); $('#vStage').innerHTML = ''; }
+function rememberPosition(m, f) {
+  const wanted = () => f.kind === 'video' || m.duration >= 600;        // videos, and long audio (podcasts, audiobooks)
+  const save = () => {
+    if (!wanted() || !isFinite(m.duration) || !m.duration) return;
+    if (m.currentTime < 10 || m.currentTime > m.duration - 20) store.del(posKey(f)); else store.set(posKey(f), String(Math.floor(m.currentTime)));
+  };
+  let last = 0;
+  m.addEventListener('loadedmetadata', () => {
+    const s = +store.get(posKey(f), 0);
+    if (wanted() && s > 10 && s < m.duration - 20) {
+      m.currentTime = s;
+      const b = $('#vResume'); b.textContent = `Resumed at ${fmtTime(s)} · Start over`; b.classList.add('on');
+      b.onclick = () => { m.currentTime = 0; b.classList.remove('on'); m.play(); };
+    }
+  }, { once: true });
+  m.addEventListener('timeupdate', () => { if (Date.now() - last > 3000) { last = Date.now(); save(); } });
+  m.addEventListener('pause', save);
+  m.addEventListener('ended', () => store.del(posKey(f)));
+  viewer.save = save;
+}
+function decodeSub(buf) {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
+  if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  catch { return new TextDecoder('windows-1256').decode(buf); }       // older Persian subtitles
+}
+function srtToVtt(t) {
+  t = t.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/(\d{1,2}:\d{2}:\d{2}),(\d{1,3})/g, '$1.$2').replace(/\{\\[^}]*\}/g, '');
+  return /^WEBVTT/.test(t) ? t : 'WEBVTT\n\n' + t;
+}
+async function addSubtitles(video, f) {
+  const stem = f.name.replace(/\.[^.]+$/, '').toLowerCase();
+  let siblings = state.mode === 'drive' && !state.q && state.path === f.folder ? state.files : null;
+  if (!siblings) { try { siblings = (await api('/api/list?path=' + encodeURIComponent(f.folder))).files; } catch { return; } }
+  const subs = siblings.filter(s => ready(s) && /\.(srt|vtt)$/i.test(s.name) && s.name.toLowerCase().startsWith(stem + '.'))
+    .sort((a, b) => a.name.length - b.name.length);
+  let n = 0;
+  for (const s of subs) {
+    let text;
+    try { text = decodeSub(await (await fetch(fileUrl(s))).arrayBuffer()); } catch { continue; }
+    if (viewer.list[viewer.i] !== f || !video.isConnected) return;
+    const middle = s.name.slice(stem.length + 1).replace(/\.(srt|vtt)$/i, '');
+    const tr = document.createElement('track');
+    tr.kind = 'subtitles'; tr.label = middle || 'Subtitles';
+    if (/^[a-z]{2,3}$/i.test(middle)) tr.srclang = middle.toLowerCase();
+    tr.src = URL.createObjectURL(new Blob([srtToVtt(text)], { type: 'text/vtt' }));
+    video.appendChild(tr);
+    n++;
+  }
+  // show one: the browser's language if there is one for it, else Persian, else the first
+  const tracks = [...video.textTracks], langs = navigator.languages.map(l => l.slice(0, 2).toLowerCase());
+  const pick = tracks.find(t => langs.includes((t.language || '').slice(0, 2))) || tracks.find(t => /^(fa|per|fas)$/i.test(t.language)) || tracks[0];
+  const apply = () => tracks.forEach(t => t.mode = t === pick ? 'showing' : 'disabled');
+  apply(); setTimeout(apply, 50);                      // the browser applies its own choice once tracks load
+  video.querySelectorAll('track').forEach(el => el.addEventListener('load', apply));
+  if (pick) toast(`Subtitles: ${pick.label}` + (n > 1 ? ` (${n - 1} more in the player's ⋮ menu)` : ''));
+}
+function closeViewer() { leaveMedia(); $('#viewer').classList.remove('on'); $('#vStage').innerHTML = ''; }
 function step(d) { if (viewer.list.length < 2) return; viewer.i = (viewer.i + d + viewer.list.length) % viewer.list.length; showViewer(); }
 $('#vStage').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) step(+b.dataset.v); else if (e.target === e.currentTarget) closeViewer(); });
 $('#vClose').onclick = closeViewer;
@@ -476,22 +848,39 @@ $('#vLink').onclick = async () => {
   try { await navigator.clipboard.writeText(link); toast('Link copied. In VLC: Media › Open Network Stream, then paste.'); }
   catch { prompt('Copy this link:', link); }
 };
+window.addEventListener('beforeunload', leaveMedia);
 document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
   if ($('#viewer').classList.contains('on')) {
     if (e.key === 'Escape') closeViewer();
     else if (e.key === 'ArrowRight' && e.target.tagName !== 'VIDEO') step(1);
     else if (e.key === 'ArrowLeft' && e.target.tagName !== 'VIDEO') step(-1);
   } else if ($('#settings').classList.contains('on')) {
     if (e.key === 'Escape') closeSettings();
-  } else if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) { e.preventDefault(); $('#q').focus(); }
+  } else if ($('#dlg').classList.contains('on')) {
+    if (e.key === 'Escape') closeDlg();
+  } else if (e.key === 'Escape' && $('#qHelp').classList.contains('on')) $('#qHelp').classList.remove('on');
+  else if (e.key === 'Escape' && state.sel.size) clearSel();
+  else if (typing) return;
+  else if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && (state.mode === 'drive' || state.q)) { e.preventDefault(); selectAll(); }
+  else if (e.key === 'Delete' && state.sel.size) $('#selbar [data-sel="delete"]').click();
 });
 
 /* ---------- search ---------- */
 let qT;
 function syncClear() { $('#qClear').style.display = $('#q').value ? 'inline-flex' : 'none'; }
-$('#q').addEventListener('input', () => { syncClear(); clearTimeout(qT); qT = setTimeout(() => { state.q = $('#q').value.trim(); load(); }, 250); });
-$('#q').addEventListener('keydown', e => { if (e.key === 'Escape') { $('#q').value = ''; syncClear(); state.q = ''; load(); } });
-$('#qClear').onclick = e => { e.preventDefault(); $('#q').value = ''; syncClear(); state.q = ''; load(); };
+function runSearch() { state.q = $('#q').value.trim(); clearSel(); load(); }
+$('#q').addEventListener('input', () => { syncClear(); clearTimeout(qT); qT = setTimeout(runSearch, 250); });
+$('#q').addEventListener('keydown', e => { if (e.key === 'Escape') { clearSearch(); load(); } });
+$('#qClear').onclick = e => { e.preventDefault(); clearSearch(); load(); };
+$('#bQHelp').onclick = () => $('#qHelp').classList.toggle('on');
+$('#qHelp').addEventListener('click', e => {
+  e.preventDefault();
+  const c = e.target.closest('code'); if (!c) return;
+  const q = $('#q'); q.value = (q.value.trim() + ' ' + c.textContent).trim() + ' '; q.focus(); syncClear(); runSearch();
+});
+document.addEventListener('click', e => { if (!e.target.closest('#qHelp,#bQHelp')) $('#qHelp').classList.remove('on'); });
 
 /* ---------- toolbar ---------- */
 $('#bView').onclick = () => { state.view = state.view === 'list' ? 'grid' : 'list'; store.set('view', state.view); render(); };
@@ -575,10 +964,13 @@ async function poll() {
     up.jobs = (await api('/api/jobs')).jobs;
     let changed = false;
     for (const j of up.jobs) if (j.state === 'done' && !up.doneSeen.has(j.id)) { up.doneSeen.add(j.id); changed = true; }
+    const keeping = new Set(up.jobs.filter(j => j.state === 'keeping').map(j => j.id));
+    if ([...(up.keeping || [])].some(id => !keeping.has(id))) changed = true;          // a kept file finished
+    up.keeping = keeping;
     if (changed) refresh();
     renderPanel();
   } catch {}
-  const active = up.jobs.some(j => ['queued','uploading','retry','sharing'].includes(j.state)) || up.items.some(i => i.state === 'waiting' || i.state === 'sending');
+  const active = up.jobs.some(j => ['queued','uploading','retry','sharing','keeping'].includes(j.state)) || up.items.some(i => i.state === 'waiting' || i.state === 'sending');
   if (active) pollT = setTimeout(poll, 1200);
   else up.polling = false;
 }
@@ -593,10 +985,10 @@ function renderPanel() {
   for (const j of up.jobs) {
     if (up.hidden.has(j.id)) continue;
     const pct = j.total ? Math.round(j.done * 100 / j.total) : 100;
-    const s = j.state === 'queued' ? 'Waiting for Telegram' : j.state === 'uploading' ? `Uploading to Telegram ${pct}%` : j.state === 'retry' ? `Network problem, retrying soon (${j.error})` : j.state === 'sharing' ? (j.total ? `Sending ${pct}%` : 'Sending…') : j.state === 'done' ? 'Done' : `Failed: ${j.error}`;
+    const s = j.state === 'keeping' ? `Keeping on this PC ${pct}%` : j.state === 'queued' ? 'Waiting for Telegram' : j.state === 'uploading' ? `Uploading to Telegram ${pct}%` : j.state === 'retry' ? `Network problem, retrying soon (${j.error})` : j.state === 'sharing' ? (j.total ? `Sending ${pct}%` : 'Sending…') : j.state === 'done' ? 'Done' : `Failed: ${j.error}`;
     rows.push(`<div class="job ${j.state === 'done' ? 'done' : j.state === 'error' || j.state === 'retry' ? 'err' : ''}"><div class="n" dir="auto">${esc(j.path)}</div><div class="s"><span>${esc(s)}</span><span>${fmtSize(j.total)}</span></div><div class="p"><i style="width:${j.state === 'queued' ? 0 : pct}%"></i></div></div>`);
   }
-  const active = up.items.filter(i => i.state === 'waiting' || i.state === 'sending').length + up.jobs.filter(j => ['queued','uploading','retry','sharing'].includes(j.state)).length;
+  const active = up.items.filter(i => i.state === 'waiting' || i.state === 'sending').length + up.jobs.filter(j => ['queued','uploading','retry','sharing','keeping'].includes(j.state)).length;
   if (active && !up.dismissed) $('#panel').classList.add('on');
   $('#pTitle').textContent = active ? `Uploading ${active} item${active === 1 ? '' : 's'}` : 'Uploads finished';
   $('#pList').innerHTML = rows.join('') || '<div class="job"><div class="s">Nothing here</div></div>';
@@ -614,7 +1006,9 @@ $('#pClear').onclick = () => {
 async function loadStats() {
   try {
     const s = await api('/api/stats');
-    if (state.version && s.version !== state.version) load();
+    if (state.version && s.version !== state.version && state.mode !== 'photos') load();
+    state.trashDays = s.trash_days || 30;
+    $('#trashCount').textContent = s.trash ? s.trash : '';
     state.version = s.version;
     $('#chan').textContent = s.channel ? 'Channel: ' + s.channel : 'Connected';
     if (s.channel) $('#chan2').textContent = s.channel;
@@ -630,6 +1024,8 @@ async function loadStats() {
       `<div><span>Telegram messages</span><b>${s.messages}</b></div>` +
       `<div><span>Index backup</span><b>${esc(backup)}</b></div>` +
       (s.sync || []).map(p => `<div title="${esc(p.local)} ⇄ ${esc(p.remote)}"><span>Sync ${esc(p.remote)}</span><b class="pill ${/^in sync/.test(p.status) ? 'on' : /error|paused/.test(p.status) ? 'warn' : ''}">${esc(p.status)}</b></div>`).join('') +
+      (s.trash ? `<div><span>Trash</span><b>${s.trash} · ${fmtSize(s.trash_bytes)}</b></div>` : '') +
+      (s.versions ? `<div title="Older versions of replaced files, kept ${state.trashDays} days"><span>Older versions</span><b>${s.versions} · ${fmtSize(s.versions_bytes)}</b></div>` : '') +
       (s.pending ? `<div><span>Waiting to upload</span><b class="pill warn">${s.pending} · ${fmtSize(s.pending_bytes)}</b></div>` : '') +
       (s.incomplete ? `<div><span>Interrupted uploads</span><b class="pill warn">${s.incomplete}</b></div>` : '');
     if (s.pending && !up.polling) poll();
@@ -722,7 +1118,7 @@ $('#bSettings').onclick = openSettings;
 
 function refresh() { load(); loadStats(); }
 
-state.path = pathFromHash();
+{ const r = route(); state.mode = r.mode; state.path = r.path; if (r.mode === 'drive') state.lastPath = r.path; }
 load(); loadStats(); poll();
 setInterval(loadStats, 10000);
 </script>
