@@ -26,3 +26,6 @@ SHARE_PORT = 8001               # share links on the Wi-Fi
 UPLOAD_PARALLEL = 3             # small files uploading at the same time
 BACKUP_KEEP = 7                 # index backups kept in the channel
 TELEGRAM_FOLDERS = True         # one message per folder in the channel, under a pinned "My Drive"
+WEEKLY_DIGEST = True            # a short summary in Saved Messages once a week
+LOW_DISK_PERCENT = 10           # below this much free space, recently opened copies are freed
+RECENT_CACHE_SIZE = 10 * 1024 ** 3   # at most this much for recently opened copies

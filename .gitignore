@@ -27,3 +27,7 @@ setup_rclone.bat
 start.bat
 setup_drive.bat
    Update .gitignore
+
+# Test leftovers
+.test-data/
+.pytest_cache/

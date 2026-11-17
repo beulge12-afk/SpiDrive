@@ -39,6 +39,8 @@ with us, and your encryption key never leaves your device.
 
 **Telegram-powered**
 
+- **Weekly digest in Saved Messages,** like "42 files, 3.1 GB added, 1 failed upload, health OK, 2 files
+  in the trash expiring".
 - **Your folders in the channel.** A pinned **📁 My Drive** message lists your folders and files as links;
   tap a folder to open its own message. Kept up to date as you add, move and delete.
 - **Phone control through Saved Messages.** Send `/find`, `/get`, `/stats` or `/keep` to yourself, and your
@@ -52,6 +54,10 @@ with us, and your encryption key never leaves your device.
 - **Backup-only folders.** Documents and Pictures upload to the drive but never download back, and
   deleting on the PC never deletes the drive copy.
 - **Upload controls.** Pause, a speed limit, and several small files uploading at once.
+- **Adaptive speed.** SpiDrive watches Telegram's FloodWait answers and slows down or speeds up by itself,
+  so your account never looks like abuse and a manual speed limit isn't needed.
+- **Disk-aware freeing.** Files you open stay on the PC for next time; when the disk drops below 10% free,
+  the least recently opened ones are freed first. Files you chose to keep on this PC always stay.
 - **Duplicate finder.** Spots identical files, and uploads instantly when the content is already there.
 
 **Security**
@@ -132,6 +138,7 @@ messages belong to which file. Encryption uses AES-256-CTR with a key derived fr
 | `webguard.py` | Stops other websites from using SpiDrive's local servers |
 | `keys.py` | Master key, passphrase and recovery key, encrypted index backups |
 | `phone.py` | `/find`, `/get`, `/stats`, `/keep` in Saved Messages |
+| `adaptive.py`, `digest.py` | Adaptive upload speed; the weekly digest |
 | `tgfolders.py` | One message per folder in the channel, under a pinned "My Drive" |
 | `links.py` | Share links on the Wi-Fi (their own small server: nothing else is reachable) |
 | `tests/` | Tests (`pip install pytest pytest-aiohttp`, then `pytest`) |

@@ -53,7 +53,10 @@ DEFAULTS = {
     "PHONE_COMMANDS": True,        # answer /find, /get, /stats, /keep in Saved Messages
     "INBOX_ORGANIZE": True,        # file Telegram Inbox items into Photos/2026-11, Voice, Docs...
     "HEALTH_CHECK": True,          # re-check random parts against their SHA-256 every hour
-    "TELEGRAM_FOLDERS": True,      # one message per folder in the channel, under a pinned "My Drive"
+    "TELEGRAM_FOLDERS": True,
+    "WEEKLY_DIGEST": True,         # a short summary in Saved Messages once a week
+    "LOW_DISK_PERCENT": 10,        # below this much free space, recently opened copies are freed
+    "RECENT_CACHE_SIZE": 10 * 1024 ** 3,   # at most this much for recently opened copies      # one message per folder in the channel, under a pinned "My Drive"
     "SHARE_PORT": 8001,            # share links on the Wi-Fi
     "UPLOAD_PARALLEL": 3,          # small files uploading at the same time
     "BACKUP_KEEP": 7,              # index backups kept in the channel

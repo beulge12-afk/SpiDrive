@@ -18,6 +18,8 @@ Both show the same files. While it runs it also:
   - answers /find, /get, /stats, /keep that you send to your Saved Messages
   - serves share links on your Wi-Fi (links.py), once you make one
   - keeps one message per folder in the channel, under a pinned "My Drive" (every minute)
+  - frees recently opened copies when this PC is low on disk space         (every minute)
+  - sends a weekly digest to your Saved Messages
   - keeps SYNC_FOLDERS from config.py in two-way sync               (every 10 s)
   - sends files to Telegram contacts when you press Share
 """
@@ -36,6 +38,7 @@ from aiohttp import web
 
 import config
 import dav
+import digest
 import keys
 import links
 import sync
@@ -67,6 +70,7 @@ def file_json(r, d=None):
     }
     if d is not None:
         out["local"] = bool(d.is_local(r))
+        out["recent"] = bool(d.is_recent(r))
     if isinstance(r, dict) and "date" in r:
         out["date"] = r["date"]
     return out
@@ -139,7 +143,8 @@ async def api_stats(req):
     return web.json_response({
         "health": {k: h[k] for k in ("status", "percent", "last_check", "running")} | {"problems": len(h["problems"])},
         "backup_encrypted": d._meta("last_backup_encrypted") == "1",
-        "uploads": {"paused": d.paused, "limit": d.limit, "parallel": UPLOAD_PARALLEL},
+        "uploads": {"paused": d.paused, "limit": d.limit, "parallel": d.parallel_uploads()} | d.speed_status(),
+        "disk": d.disk,
         "links": len(d.links()),
         "telegram_folders": req.app["tgfolders"].root_link() if "tgfolders" in req.app else None,
         "files": count, "bytes": total, "folders": folders,
@@ -182,19 +187,32 @@ async def api_jobs(req):
         if r["t"] >= cutoff:
             jobs.append({"id": f"r{int(r['t'] * 1000)}-{i}", "path": r["path"], "state": r["state"],
                          "done": r["total"], "total": r["total"], "error": r["error"], "t": r["t"]})
-    return web.json_response({"jobs": jobs, "paused": d.paused, "limit": d.limit})
+    return web.json_response({"jobs": jobs, "paused": d.paused, "limit": d.limit, "auto": d.auto_speed,
+                              "speed": d.speed_status()})
 
 
 @routes.post("/api/uploads")
 async def api_upload_controls(req):
-    """{paused: bool, limit: bytes per second (0 = no limit)}"""
+    """{paused: bool, limit: "auto" or bytes per second (0 = no limit)}"""
     data = await req.json()
     d = drive_of(req)
     limit = data.get("limit")
-    if limit is not None and not (0 <= int(limit) <= 10 ** 10):
+    if limit is not None and limit != "auto" and not (0 <= int(limit) <= 10 ** 10):
         raise ValueError("Unknown speed limit.")
     d.set_upload_controls(paused=data.get("paused"), limit=limit)
-    return web.json_response({"paused": d.paused, "limit": d.limit})
+    return web.json_response({"paused": d.paused, "limit": d.limit, "auto": d.auto_speed})
+
+
+@routes.get("/api/digest")
+async def api_digest(req):
+    return web.json_response({"text": digest.weekly_text(drive_of(req)),
+                              "last": float(drive_of(req)._meta("digest_last") or 0) or None})
+
+
+@routes.post("/api/digest/send")
+async def api_digest_send(req):
+    await digest.send(drive_of(req))
+    return web.json_response({"ok": True})
 
 
 @routes.post("/api/upload")
@@ -721,6 +739,7 @@ async def api_settings_get(req):
         "inbox_organize": bool(getattr(config, "INBOX_ORGANIZE", True)),
         "health_check": bool(getattr(config, "HEALTH_CHECK", True)),
         "telegram_folders": bool(getattr(config, "TELEGRAM_FOLDERS", True)),
+        "weekly_digest": bool(getattr(config, "WEEKLY_DIGEST", True)),
         "autostart": bool(getattr(config, "AUTOSTART", False)),
         "phone_access": HOST not in ("127.0.0.1", "localhost"),
         "has_web_password": bool(PASSWORD),
@@ -783,7 +802,7 @@ async def api_settings_post(req):
         else:
             pairs[local] = norm(remote or "/Sync")
     v["SYNC_FOLDERS"] = pairs
-    for key in ("PHONE_COMMANDS", "INBOX_ORGANIZE", "HEALTH_CHECK", "TELEGRAM_FOLDERS"):
+    for key in ("PHONE_COMMANDS", "INBOX_ORGANIZE", "HEALTH_CHECK", "TELEGRAM_FOLDERS", "WEEKLY_DIGEST"):
         if key.lower() in data:
             v[key] = bool(data[key.lower()])
 
@@ -1047,6 +1066,10 @@ async def amain(stop_event=None, interactive=True, hooks=None):
             tasks.append(asyncio.create_task(every(sync.INTERVAL, syncer.run_once, "sync")))
         tasks.append(asyncio.create_task(every(
             60, lambda: folder_msgs.run(enabled=bool(getattr(config, "TELEGRAM_FOLDERS", True))), "telegram")))
+        async def free_space():
+            return d.free_space(log)
+        tasks.append(asyncio.create_task(every(60, free_space, "disk")))
+        tasks.append(asyncio.create_task(every(3600, lambda: digest.maybe_send(d), "digest")))
         if getattr(config, "HEALTH_CHECK", True):
             tasks.append(asyncio.create_task(every(HEALTH_SECONDS, lambda: maybe_health(d), "health")))
         if getattr(config, "PHONE_COMMANDS", True):

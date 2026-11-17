@@ -254,9 +254,13 @@ Files you send or forward to the storage channel are filed by type inside **Tele
 `Photos/2026-11` and `Videos/2026-11` (by month), `Voice` (voice messages), `Music`, `Docs` and `Other`.
 Turn it off in **Settings → Telegram** to keep everything in the Inbox itself.
 
-## Uploads: pause, speed limit, duplicates
+## Uploads: pause, speed, duplicates
 
-The upload panel (bottom right) has **Pause** and a **Speed** limit. Paused files wait on this PC (they
+The upload panel (bottom right) has **Pause** and **Speed**. Speed is **automatic** by default: when
+Telegram answers "too fast, wait N seconds" (FloodWait), SpiDrive halves its upload speed and runs one
+upload fewer at a time; after each calm minute it speeds up by a quarter, until it is unlimited again. This
+keeps your account from looking like abuse. The sidebar shows *auto · slowed to …* while it is holding
+back. Pick a fixed speed in the panel to turn this off. Paused files wait on this PC (they
 are already in the drive and open normally) and continue from their last finished part when you resume.
 Up to 3 small files upload at the same time; files over 20 MB go one at a time.
 
@@ -265,6 +269,32 @@ Before uploading, SpiDrive checks whether a file with exactly the same content i
 without using more space. A file saved again without changes doesn't create a new version.
 **Duplicates** in the sidebar lists identical files on the drive and how much is stored more than once;
 **Select extra copies** keeps the oldest of each.
+
+## Weekly digest
+
+Once a week a short summary lands in your Saved Messages, for example:
+
+```
+📅 SpiDrive, 10–17 Nov
+• 42 files, 3.1 GB added
+• 1 failed upload (still retrying): report.pdf
+• Health OK, 64% verified this month
+• 2 files in the trash expire this week
+• In total: 1,234 files, 120 GB
+```
+
+Send `/digest` in Saved Messages to see it at any time, or use **Send one now** in Settings → Telegram,
+where you can also turn it off.
+
+## Recently opened files and low disk space
+
+When a file is opened in full from Telegram (in the dashboard, shared or zipped), a copy stays on the PC
+(`data\recent`), so it opens instantly next time; the dashboard marks it **recent**. These copies use at
+most 10 GB (`RECENT_CACHE_SIZE`). Every minute SpiDrive checks the disk: below 10% free
+(`LOW_DISK_PERCENT`), it deletes recently opened copies, the least recently opened first, until there is a
+little more room. Files you chose to **Keep on this PC** are never freed. If the disk stays low with nothing
+left to free, the sidebar says so. Drive S: (rclone 1.62 or newer) keeps the same 10% free by dropping its
+own cached files. The files themselves always stay in Telegram.
 
 ## Encryption keys and the recovery key
 

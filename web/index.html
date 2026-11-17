@@ -352,7 +352,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
   <header><span id="pTitle">Uploads</span>
     <span><button class="btn sm ghost" id="pClear">Clear finished</button><button class="btn icon sm ghost" id="pMin" title="Minimise">–</button></span>
   </header>
-  <div class="pctl"><button class="btn sm" id="pPause" title="Pause or resume uploads to Telegram">Pause</button><label>Speed <select id="pLimit" title="Upload speed limit"><option value="0">no limit</option><option value="131072">128 KB/s</option><option value="524288">512 KB/s</option><option value="1048576">1 MB/s</option><option value="2097152">2 MB/s</option><option value="5242880">5 MB/s</option></select></label></div>
+  <div class="pctl"><button class="btn sm" id="pPause" title="Pause or resume uploads to Telegram">Pause</button><label>Speed <select id="pLimit" title="Upload speed: automatic follows Telegram's limits"><option value="auto">automatic</option><option value="0">no limit</option><option value="131072">128 KB/s</option><option value="524288">512 KB/s</option><option value="1048576">1 MB/s</option><option value="2097152">2 MB/s</option><option value="5242880">5 MB/s</option></select></label></div>
   <div class="list" id="pList"></div>
 </div>
 
@@ -388,6 +388,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
       <h3>Telegram</h3>
       <label class="chk"><input type="checkbox" id="sPhoneCmd"> Answer /find, /get, /stats and /keep in my Saved Messages</label>
       <label class="chk"><input type="checkbox" id="sTgFolders"> Show my folders in the channel (a pinned 📁 My Drive message, with one message per folder)</label>
+      <label class="chk"><input type="checkbox" id="sDigest"> Send me a weekly digest in Saved Messages</label> <button class="btn sm" id="sDigestNow" style="margin:6px 0 0 26px">Send one now</button>
       <label class="chk"><input type="checkbox" id="sOrganize"> Sort files sent from Telegram into folders (Photos/2026-11, Videos, Voice, Docs…)</label>
       <h3>Connection to Telegram</h3>
       <label class="f" for="sPMode">How to connect</label>
@@ -556,7 +557,7 @@ function render() {
   const nd = dirs.length;
   const cb = (k, n) => `<input type="checkbox" class="cb" data-n="${n}" aria-label="Select">`;
   const acts = (i, isDir) => `<div class="acts"><button data-act="dl" data-${isDir?'d':'i'}="${i}" title="${isDir ? 'Download as ZIP' : 'Download'}">${svg('dl')}</button>${isDir ? '' : `<button data-act="share" data-i="${i}" title="Send to someone on Telegram">${svg('share')}</button><button data-act="ver" data-i="${i}" title="Earlier versions">${svg('history')}</button>`}<button data-act="mv" data-${isDir?'d':'i'}="${i}" title="Rename or move">${svg('edit')}</button><button class="del" data-act="rm" data-${isDir?'d':'i'}="${i}" title="Move to Trash">${svg('del')}</button></div>`;
-  const tags = f => (f.encrypted ? '<span class="tag" title="Encrypted">AES</span>' : '') + (f.status === 'pending' ? (up.paused ? '<span class="tag warn" title="Saved on this PC; uploads are paused">waiting (paused)</span>' : '<span class="tag" title="Saved on this PC, going to Telegram">uploading…</span>') : f.status !== 'complete' ? '<span class="tag warn">incomplete</span>' : '') + (f.keep ? (f.local ? '<span class="tag ok" title="Kept on this PC: opens without Telegram">On this PC</span>' : '<span class="tag" title="Downloading a copy to keep on this PC">keeping…</span>') : '') + (f.origin === 'telegram' ? '<span class="tag">from Telegram</span>' : '');
+  const tags = f => (f.encrypted ? '<span class="tag" title="Encrypted">AES</span>' : '') + (f.status === 'pending' ? (up.paused ? '<span class="tag warn" title="Saved on this PC; uploads are paused">waiting (paused)</span>' : '<span class="tag" title="Saved on this PC, going to Telegram">uploading…</span>') : f.status !== 'complete' ? '<span class="tag warn">incomplete</span>' : '') + (f.keep ? (f.local ? '<span class="tag ok" title="Kept on this PC: opens without Telegram">On this PC</span>' : '<span class="tag" title="Downloading a copy to keep on this PC">keeping…</span>') : '') + (!f.keep && f.recent ? '<span class="tag" title="Opened recently: a copy is on this PC, so it opens instantly. It is freed first when the PC runs low on space.">recent</span>' : '') + (f.origin === 'telegram' ? '<span class="tag">from Telegram</span>' : '');
   if (state.view === 'grid') {
     el.innerHTML = '<div class="grid">' +
       dirs.map((d, i) => `<div class="card" data-d="${i}" data-k="${esc('d:' + d.path)}">${cb('d', i)}<div class="thumb">${folderIco()}</div><div class="cap"><div dir="auto">${esc(d.name)}</div><small>Folder</small></div>${acts(i, true)}</div>`).join('') +
@@ -852,20 +853,20 @@ async function copyText(text, msg) {
 /* ---------- upload controls ---------- */
 function syncUploadControls() {
   $('#pPause').textContent = up.paused ? 'Resume' : 'Pause';
-  const sel = $('#pLimit'), v = String(up.limit || 0);
+  const sel = $('#pLimit'), v = up.auto ? 'auto' : String(up.limit || 0);
   if (![...sel.options].some(o => o.value === v)) sel.insertAdjacentHTML('beforeend', `<option value="${v}">${fmtSize(+v)}/s</option>`);
   sel.value = v;
 }
 async function setUploads(body) {
   try {
     const r = await api('/api/uploads', body);
-    up.paused = r.paused; up.limit = r.limit; syncUploadControls(); poll(); loadStats();
+    up.paused = r.paused; up.limit = r.limit; up.auto = r.auto; syncUploadControls(); poll(); loadStats();
     if ('paused' in body) toast(r.paused ? 'Uploads paused. New files wait on this PC until you resume.' : 'Uploads resumed');
-    else toast(r.limit ? `Uploads limited to ${fmtSize(r.limit)}/s` : 'No upload speed limit');
+    else toast(r.auto ? 'Automatic speed: SpiDrive slows down when Telegram asks, and speeds up again after.' : r.limit ? `Uploads limited to ${fmtSize(r.limit)}/s` : 'No upload speed limit');
   } catch (e) { toast(e.message); }
 }
 $('#pPause').onclick = () => setUploads({ paused: !up.paused });
-$('#pLimit').onchange = e => setUploads({ limit: +e.target.value });
+$('#pLimit').onchange = e => setUploads({ limit: e.target.value === 'auto' ? 'auto' : +e.target.value });
 $('#sMeta').addEventListener('click', e => { if (e.target.closest('[data-resume]')) setUploads({ paused: false }); });
 
 /* ---------- passphrase and recovery key ---------- */
@@ -1157,7 +1158,7 @@ async function poll() {
   clearTimeout(pollT); up.polling = true;
   try {
     const jr = await api('/api/jobs');
-    up.jobs = jr.jobs; up.paused = jr.paused; up.limit = jr.limit; syncUploadControls();
+    up.jobs = jr.jobs; up.paused = jr.paused; up.limit = jr.limit; up.auto = jr.auto; syncUploadControls();
     let changed = false;
     for (const j of up.jobs) if (j.state === 'done' && !up.doneSeen.has(j.id)) { up.doneSeen.add(j.id); changed = true; }
     const keeping = new Set(up.jobs.filter(j => j.state === 'keeping').map(j => j.id));
@@ -1221,7 +1222,9 @@ async function loadStats() {
       `<div><span>Telegram messages</span><b>${s.messages}</b></div>` +
       `<div title="${s.last_backup && !s.backup_encrypted ? 'Set an encryption passphrase in Settings to encrypt the index backup' : 'The daily copy of the file list in your channel'}"><span>Index backup</span><b>${esc(backup)}${s.last_backup ? (s.backup_encrypted ? ' · encrypted' : ' · not encrypted') : ''}</b></div>` +
       (s.uploads && s.uploads.paused ? `<div><span>Uploads</span><b class="pill warn" data-resume style="cursor:pointer" title="Click to resume">paused · resume</b></div>` : '') +
-      (s.uploads && s.uploads.limit ? `<div><span>Upload speed</span><b>max ${fmtSize(s.uploads.limit)}/s</b></div>` : '') +
+      (s.uploads ? `<div title="${esc(speedTitle(s.uploads))}"><span>Upload speed</span><b class="pill ${s.uploads.auto && s.uploads.rate ? 'warn' : ''}">${esc(speedLabel(s.uploads))}</b></div>` : '') +
+      (s.disk && s.disk.total ? `<div title="${esc(s.disk.warning || `Recently opened copies: ${fmtSize(s.disk.recent_bytes || 0)} (freed first when space runs low). Kept on this PC: ${fmtSize(s.disk.kept_bytes || 0)} (never freed by SpiDrive).`)}"><span>This PC</span><b class="pill ${s.disk.low ? 'bad' : ''}">${fmtSize(s.disk.free)} free (${Math.round(100 * s.disk.free / s.disk.total)}%)</b></div>` : '') +
+      (s.disk && s.disk.recent_bytes ? `<div><span>Recently opened</span><b>${fmtSize(s.disk.recent_bytes)}</b></div>` : '') +
       (s.links ? `<div><span>Share links</span><b>${s.links} active</b></div>` : '') +
       (s.sync || []).map(p => `<div title="${esc(p.local)} ${p.mode === 'backup' ? '→' : '⇄'} ${esc(p.remote)}"><span>${p.mode === 'backup' ? 'Backup' : 'Sync'} ${esc(p.remote)}</span><b class="pill ${/^(in sync|backed up)/.test(p.status) ? 'on' : /error|paused|not found/.test(p.status) ? 'warn' : ''}">${esc(p.status)}</b></div>`).join('') +
       (s.trash ? `<div><span>Trash</span><b>${s.trash} · ${fmtSize(s.trash_bytes)}</b></div>` : '') +
@@ -1261,7 +1264,7 @@ async function openSettings() {
   const used = new Set(s.sync.map(p => p.local.toLowerCase()));
   $('#sKnown').innerHTML = Object.entries(s.known_folders || {}).filter(([, v]) => !used.has(v.toLowerCase()))
     .map(([k, v]) => `<button class="btn sm ghost" data-known="${esc(v)}" data-label="${esc(k)}" title="${esc(v)}">+ Back up ${esc(k)}</button>`).join('');
-  $('#sTgFolders').checked = s.telegram_folders; $('#sPhoneCmd').checked = s.phone_commands; $('#sOrganize').checked = s.inbox_organize; $('#sHealth').checked = s.health_check;
+  $('#sTgFolders').checked = s.telegram_folders; $('#sDigest').checked = s.weekly_digest; $('#sPhoneCmd').checked = s.phone_commands; $('#sOrganize').checked = s.inbox_organize; $('#sHealth').checked = s.health_check;
   $('#sKeyBox').style.display = s.has_passphrase ? '' : 'none';
   $('#sKeyInfo').innerHTML = s.recovery_key ? `Recovery key made ${esc(fmtDate(s.recovery_key))}. Keep the printout somewhere safe.` : 'No recovery key yet. Make one and print it: it opens your files and the index backup if you ever forget the passphrase.';
   $('#sRecovery').textContent = s.recovery_key ? 'New recovery key' : 'Create recovery key';
@@ -1280,6 +1283,10 @@ $('#sKnown').addEventListener('click', e => {
   $('#sPairs').appendChild(pairRow({ local: b.dataset.known, remote: '/Backup/' + b.dataset.label, mode: 'backup' })); b.remove();
 });
 $('#sChangePass').onclick = openChangePass;
+$('#sDigestNow').onclick = async e => {
+  e.preventDefault();
+  try { await api('/api/digest/send', {}); toast('Sent. Look in your Saved Messages in Telegram.'); } catch (err) { toast(err.message); }
+};
 $('#sRecovery').onclick = () => newRecoveryKey($('#sRecovery').textContent.startsWith('New'));
 $('#setClose').onclick = closeSettings; $('#setCancel').onclick = closeSettings;
 $('#settings').addEventListener('click', e => { if (e.target.id === 'settings') closeSettings(); });
@@ -1291,7 +1298,7 @@ $('#setSave').onclick = async () => {
     proxy_mode: $('#sPMode').value, proxy_link: $('#sPLink').value.trim(),
     proxy_sources: $('#sPSources').value.split('\n').map(x => x.trim()).filter(Boolean),
     sync: [...document.querySelectorAll('#sPairs .pair')].map(r => ({ local: r.querySelector('.pl').value, remote: r.querySelector('.pr').value, mode: r.querySelector('.pm').value })),
-    telegram_folders: $('#sTgFolders').checked, phone_commands: $('#sPhoneCmd').checked, inbox_organize: $('#sOrganize').checked, health_check: $('#sHealth').checked,
+    telegram_folders: $('#sTgFolders').checked, weekly_digest: $('#sDigest').checked, phone_commands: $('#sPhoneCmd').checked, inbox_organize: $('#sOrganize').checked, health_check: $('#sHealth').checked,
   };
   try {
     const r = await api('/api/settings', body);
@@ -1308,6 +1315,16 @@ function waitForRestart() {
     setTimeout(tick, 1200);
   };
   setTimeout(tick, 1500);
+}
+function speedLabel(u) {
+  if (!u.auto) return u.limit ? `max ${fmtSize(u.limit)}/s` : 'no limit';
+  return u.rate ? `auto · slowed to ${fmtSize(u.rate)}/s` : 'automatic';
+}
+function speedTitle(u) {
+  if (!u.auto) return 'A fixed limit you chose in the upload panel. Choose "automatic" to let SpiDrive follow Telegram.';
+  const f = u.last_flood;
+  return (u.rate ? `Telegram asked SpiDrive to wait ${f ? f.seconds + ' s at ' + fmtDate(f.t) : ''}, so uploads are slowed down for a while (${u.parallel} at a time). They speed up again after each calm minute.`
+    : `Uploads go as fast as Telegram allows. SpiDrive slows down by itself if Telegram asks it to wait.`) + (u.floods_today ? ` Slowed down ${u.floods_today} time(s) today.` : '');
 }
 function connLabel(c) {
   if (!c) return '';

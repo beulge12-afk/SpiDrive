@@ -83,6 +83,8 @@ class FakeClient:
             yield m
 
     async def send_message(self, chat, text, **kw):
+        if chat != "channel":
+            self.sent_to.append((chat, None, text))
         m = self.add(b"", text)
         m.media = None
         return m
@@ -123,7 +125,8 @@ class FakeClient:
 def drive(tmp_path, monkeypatch):
     data = tmp_path / "data"
     for name, sub in [("DATA_DIR", ""), ("DB_PATH", "index.db"), ("INCOMING", "incoming"),
-                      ("THUMBS_PATH", "thumbs.db"), ("TRASH_LOCAL", "trash-local"), ("OFFLINE", "offline")]:
+                      ("THUMBS_PATH", "thumbs.db"), ("TRASH_LOCAL", "trash-local"), ("OFFLINE", "offline"),
+                      ("RECENT", "recent")]:
         monkeypatch.setattr(drive_core, name, str(data / sub) if sub else str(data))
     monkeypatch.setattr(drive_core, "CHUNK_SIZE", 64 * 1024)
     monkeypatch.setattr(cfg, "ENCRYPT", False)

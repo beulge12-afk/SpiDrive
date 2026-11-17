@@ -8,6 +8,7 @@ answers there:
     /get <number | /path | words>   send that file to Saved Messages
     /keep <number | /path | words>  keep it on the PC (opens without Telegram)
     /stats                     how much is stored, what is uploading, drive health
+    /digest                    this week's summary (also sent by itself once a week)
     /help                      this list
 
 Nothing listens on the network: the commands travel through your own Telegram
@@ -25,6 +26,7 @@ HELP = ("📁 SpiDrive commands (send them here, in Saved Messages):\n\n"
         "/get /Docs/report.pdf — send a file by its path\n"
         "/keep 2 — keep that file on the PC\n"
         "/stats — storage, uploads and drive health\n"
+        "/digest — this week's summary\n"
         "/help — this list")
 COMMAND = re.compile(r"^/(\w+)(?:@\w+)?(?:\s+(.*))?$", re.S)
 
@@ -74,6 +76,9 @@ class Phone:
             return self.keep(arg)
         if cmd == "stats":
             return self.stats()
+        if cmd == "digest":
+            import digest
+            return digest.weekly_text(self.d)
         return f"❓ Unknown command /{cmd}. Send /help for the list."
 
     # ---------- commands

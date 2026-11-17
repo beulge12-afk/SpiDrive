@@ -37,6 +37,7 @@ from telethon import TelegramClient
 from telethon.tl.types import (DocumentAttributeFilename, MessageMediaDocument,
                                MessageMediaPhoto)
 
+import adaptive
 import config
 import keys
 import search
@@ -55,6 +56,10 @@ MEDIA_CACHE_SECONDS = 1800
 THUMBS_PATH = os.path.join(DATA_DIR, "thumbs.db")  # photo previews (never sent to the channel)
 TRASH_LOCAL = os.path.join(DATA_DIR, "trash-local")  # deleted files that never reached Telegram
 OFFLINE = os.path.join(DATA_DIR, "offline")        # files kept on this PC (decrypted)
+RECENT = os.path.join(DATA_DIR, "recent")          # recently opened files (freed when space is needed)
+RECENT_MAX_FILE = 2 * 1024 ** 3                    # bigger files are not kept after opening
+RECENT_CACHE_SIZE = int(getattr(config, "RECENT_CACHE_SIZE", 10 * 1024 ** 3))
+LOW_DISK_PERCENT = float(getattr(config, "LOW_DISK_PERCENT", 10))
 TRASH_DAYS = int(getattr(config, "TRASH_DAYS", 30))
 KEEP_VERSIONS = int(getattr(config, "KEEP_VERSIONS", 10))
 LIVE = "substr(path,1,1)='/'"                      # rows that are on the drive (not in the trash)
@@ -201,6 +206,12 @@ class Drive:
         self.keeping = {}             # file id -> {"done", "total", "path"} while kept files download
         self.paused = self._meta("uploads_paused") == "1"
         self.limit = int(self._meta("upload_limit") or 0)   # bytes per second, 0 = no limit
+        self.auto_speed = (self._meta("upload_auto") or "1") == "1"   # adaptive.py decides the speed
+        self.adaptive = adaptive.AdaptiveSpeed(UPLOAD_PARALLEL)
+        self.adaptive.on_flood_hook = lambda sec, req: self.event("flood", "", f"{sec}s on {req}")
+        adaptive.watch(self.adaptive)
+        self._caching = set()         # file ids being copied to RECENT right now
+        self.disk = {"free": None, "total": None, "low": False, "freed_bytes": 0, "warning": None}
         self._next_free = 0.0         # shared schedule for the speed limit
         self._handlers = []           # Telegram event handlers (phone commands)
         self.health_running = False
@@ -345,6 +356,18 @@ class Drive:
             error   TEXT,
             PRIMARY KEY(file_id, idx)
         );
+        CREATE TABLE IF NOT EXISTS events(
+            t      REAL NOT NULL,
+            kind   TEXT NOT NULL,                    -- upload_failed, flood, freed, digest
+            path   TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS events_t ON events(t);
+        CREATE TABLE IF NOT EXISTS recent(
+            file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+            size    INTEGER NOT NULL,
+            opened  REAL NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS links(
             token     TEXT PRIMARY KEY,
             path      TEXT NOT NULL,
@@ -410,6 +433,12 @@ class Drive:
         self.db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('wrap_pass_salt',?)", (salt,))
         self.db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('wrap_pass',?)",
                         (keys.wrap(keys.kdf(passphrase, salt), master),))
+        self.db.commit()
+
+    def event(self, kind, path="", detail=""):
+        """Remember something for the weekly digest (kept 60 days)."""
+        self.db.execute("INSERT INTO events(t,kind,path,detail) VALUES(?,?,?,?)", (time.time(), kind, path, detail))
+        self.db.execute("DELETE FROM events WHERE t<?", (time.time() - 60 * 86400,))
         self.db.commit()
 
     def has_key(self):
@@ -748,8 +777,9 @@ class Drive:
             t.cancel()
 
     def set_upload_controls(self, paused=None, limit=None):
-        """Pause or resume uploads, and set a speed limit in bytes per second (0 = none).
-        Pausing stops running uploads; they continue from their last finished part."""
+        """Pause or resume uploads, and set the speed: "auto" (adaptive.py), or a limit in
+        bytes per second (0 = none). Pausing stops running uploads; they continue from
+        their last finished part."""
         if paused is not None:
             self.paused = bool(paused)
             self._set_meta("uploads_paused", "1" if self.paused else "0")
@@ -757,16 +787,36 @@ class Drive:
                 for t in list(self._active.values()):
                     t.cancel()
         if limit is not None:
-            self.limit = max(0, int(limit))
-            self._set_meta("upload_limit", str(self.limit))
+            self.auto_speed = str(limit) == "auto"
+            self._set_meta("upload_auto", "1" if self.auto_speed else "0")
+            if not self.auto_speed:
+                self.limit = max(0, int(limit))
+                self._set_meta("upload_limit", str(self.limit))
         self._wake.set()
+
+    def speed_limit(self):
+        """Bytes per second uploads may use now (0 = no limit)."""
+        if self.auto_speed:
+            return self.adaptive.rate or 0
+        return self.limit
+
+    def parallel_uploads(self):
+        return self.adaptive.parallel if self.auto_speed else UPLOAD_PARALLEL
+
+    def speed_status(self):
+        return {"auto": self.auto_speed, "limit": self.limit, "now_limit": self.speed_limit(),
+                "parallel": self.parallel_uploads()} | self.adaptive.status()
 
     async def _throttle(self, nbytes):
         """Keep all uploads together under the speed limit."""
-        if not self.limit or nbytes <= 0:
+        if nbytes <= 0:
+            return
+        self.adaptive.on_bytes(nbytes)
+        limit = self.speed_limit()
+        if not limit:
             return
         now = time.monotonic()
-        self._next_free = max(self._next_free, now) + nbytes / self.limit
+        self._next_free = max(self._next_free, now) + nbytes / limit
         delay = self._next_free - now - 0.25
         if delay > 0:
             await asyncio.sleep(delay)
@@ -813,11 +863,12 @@ class Drive:
         try:
             while True:
                 self._empty_trash()
+                self.adaptive.tick()
                 now = time.time()
                 if not self.paused:
                     big_running = any(sz > SMALL_FILE for sz in self._active_size.values())
                     for p in self.pending():
-                        if len(self._active_size) >= UPLOAD_PARALLEL:
+                        if len(self._active_size) >= self.parallel_uploads():
                             break
                         if p["id"] in self._active_size or self._retry_at.get(p["id"], 0) > now:
                             continue
@@ -882,7 +933,11 @@ class Drive:
             prog["tries"] = tries
             wait = min(300, 15 * 2 ** (tries - 1))
             prog["error"] = f"{exc or type(exc).__name__}"
+            if type(exc).__name__ == "FloodWaitError":              # longer than Telethon waits by itself
+                self.adaptive.on_flood(getattr(exc, "seconds", 60), "upload")
+                wait = max(wait, getattr(exc, "seconds", 0))
             self._retry_at[pid] = time.time() + wait
+            self.event("upload_failed", target, str(prog["error"])[:200])
             log(f"upload failed ({target}): {exc!r}. Retrying in {wait}s")
             return
 
@@ -1135,13 +1190,58 @@ class Drive:
     def offline_path(self, file_id):
         return os.path.join(OFFLINE, str(file_id))
 
-    def _local_copy(self, row):
-        """Path of the kept copy on this PC, if it is there and complete."""
-        p = self.offline_path(row["id"])
+    @staticmethod
+    def _complete(p, size):
         try:
-            return p if os.path.getsize(p) == row["size"] else None
+            return p if os.path.getsize(p) == size else None
         except OSError:
             return None
+
+    def _kept_copy(self, row):
+        """Path of the copy kept on this PC on purpose (Keep on this PC), if complete."""
+        return self._complete(self.offline_path(row["id"]), row["size"])
+
+    def _recent_copy(self, row):
+        """Path of the copy left from opening the file recently, if complete."""
+        return self._complete(os.path.join(RECENT, str(row["id"])), row["size"])
+
+    def _local_copy(self, row):
+        """Any complete copy on this PC to read instead of Telegram."""
+        p = self._kept_copy(row)
+        if p:
+            return p
+        p = self._recent_copy(row)
+        if p:
+            self.db.execute("UPDATE recent SET opened=? WHERE file_id=?", (time.time(), row["id"]))
+            self.db.commit()
+        return p
+
+    async def _tee_recent(self, row, gen):
+        """Pass a whole-file read through, keeping a copy in RECENT for next time.
+        A read that stops early leaves nothing behind."""
+        fid = row["id"]
+        self._caching.add(fid)
+        os.makedirs(RECENT, exist_ok=True)
+        part = os.path.join(RECENT, f"{fid}.part")
+        ok = False
+        try:
+            with open(part, "wb") as out:
+                try:
+                    async for data in gen:
+                        out.write(data)
+                        yield data
+                finally:
+                    await gen.aclose()
+            ok = os.path.getsize(part) == row["size"]
+        finally:
+            self._caching.discard(fid)
+            if ok:
+                os.replace(part, os.path.join(RECENT, str(fid)))
+                self.db.execute("INSERT OR REPLACE INTO recent(file_id,size,opened) VALUES(?,?,?)",
+                                (fid, row["size"], time.time()))
+                self.db.commit()
+            else:
+                self._discard(part)
 
     @staticmethod
     async def _iter_file(path, offset, end):
@@ -1164,19 +1264,31 @@ class Drive:
         async for data in self.iter_row(row, offset, length):
             yield data
 
-    async def iter_row(self, row, offset=0, length=None, local=True):
-        """Like iter_bytes, for a files row (also one in the trash). Reads the copy
-        kept on this PC when there is one (unless local=False)."""
-        remote = row["path"]
+    async def iter_row(self, row, offset=0, length=None, local=True, remember=True):
+        """Like iter_bytes, for a files row (also one in the trash). Reads a copy on this
+        PC when there is one (unless local=False). A whole file read from Telegram is
+        remembered in RECENT (unless remember=False), so it opens instantly next time."""
         size = row["size"]
         end = size if length is None else min(size, offset + length)
         if offset >= end:
             return
-        local = self._local_copy(row) if local else None
-        if local:
-            async for data in self._iter_file(local, offset, end):
+        copy = self._local_copy(row) if local else None
+        if copy:
+            async for data in self._iter_file(copy, offset, end):
                 yield data
             return
+        gen = self._iter_telegram(row, offset, end)
+        if (remember and local and offset == 0 and end == size and 0 < size <= RECENT_MAX_FILE
+                and row["path"].startswith("/") and row["id"] not in self._caching):
+            gen = self._tee_recent(row, gen)
+        try:
+            async for data in gen:
+                yield data
+        finally:
+            await gen.aclose()                            # stopped early: clean up at once
+
+    async def _iter_telegram(self, row, offset, end):
+        remote = row["path"]
         key = self._get_key() if row["encrypted"] else None
 
         for ch in self._chunks(row["id"]):
@@ -1247,8 +1359,12 @@ class Drive:
             row = self.get_file_by_id(entry["id"])
             if row is None or row["status"] != "complete":
                 raise FileNotFoundError(entry["path"])
-            async for data in self.iter_row(row, offset, length):
-                yield data
+            gen = self.iter_row(row, offset, length)
+            try:
+                async for data in gen:
+                    yield data
+            finally:
+                await gen.aclose()
             return
         end = entry["size"] if length is None else min(entry["size"], offset + length)
         async for data in self._iter_file(entry["tmp"], offset, end):
@@ -1514,10 +1630,59 @@ class Drive:
         return n
 
     def is_local(self, entry):
-        """True when the file opens without Telegram (waiting upload, or kept copy ready)."""
+        """True when the file opens without Telegram (waiting upload, kept or recent copy)."""
         if entry["status"] == "pending":
             return True
-        return entry["status"] == "complete" and entry.get("keep") and self._local_copy(entry) is not None
+        return entry["status"] == "complete" and (self._kept_copy(entry) or self._recent_copy(entry)) is not None
+
+    def is_recent(self, entry):
+        return entry["status"] == "complete" and not entry.get("keep") and self._recent_copy(entry) is not None
+
+    # ---------- disk-aware freeing
+
+    def free_space(self, log=print):
+        """When this PC's disk has less than LOW_DISK_PERCENT free, delete recently opened
+        copies, least recently opened first, until there is a little more room. Copies
+        kept with "Keep on this PC" are never touched. Also keeps the recent copies under
+        RECENT_CACHE_SIZE. Returns what was freed."""
+        os.makedirs(RECENT, exist_ok=True)
+        known = {r["file_id"]: r for r in self.db.execute("SELECT * FROM recent")}
+        for name in os.listdir(RECENT):                  # leftovers (deleted files, crashes)
+            fid = name.split(".")[0]
+            if not name.endswith(".part") and (not fid.isdigit() or int(fid) not in known):
+                self._discard(os.path.join(RECENT, name))
+        rows = self.db.execute("SELECT * FROM recent ORDER BY opened").fetchall()
+        usage = shutil.disk_usage(DATA_DIR)
+        low = usage.free < usage.total * LOW_DISK_PERCENT / 100
+        need = usage.total * (LOW_DISK_PERCENT + 2) / 100 - usage.free if low else 0
+        over = sum(r["size"] for r in rows) - RECENT_CACHE_SIZE
+        freed, count = 0, 0
+        for r in rows:
+            if freed >= max(need, over, 0) or (need <= 0 and over <= 0):
+                break
+            self._discard(os.path.join(RECENT, str(r["file_id"])))
+            self.db.execute("DELETE FROM recent WHERE file_id=?", (r["file_id"],))
+            freed += r["size"]
+            count += 1
+        self.db.commit()
+        if freed:
+            why = "this PC was low on space" if low else "recently opened copies passed their size limit"
+            self.event("freed", "", f"{count} file(s), {freed} bytes, {why}")
+            self.disk["freed_bytes"] += freed
+        usage = shutil.disk_usage(DATA_DIR)
+        still_low = usage.free < usage.total * LOW_DISK_PERCENT / 100
+        kept = 0
+        for n in (os.listdir(OFFLINE) if os.path.isdir(OFFLINE) else []):
+            try:
+                kept += os.path.getsize(os.path.join(OFFLINE, n))
+            except OSError:
+                pass
+        self.disk.update(free=usage.free, total=usage.total, low=still_low,
+                         recent_bytes=sum(r["size"] for r in self.db.execute("SELECT size FROM recent")),
+                         kept_bytes=kept,
+                         warning=("This PC is low on space and there are no recently opened copies left to free. "
+                                  "Use Free up space on files kept on this PC.") if still_low else None)
+        return [f"freed {count} recently opened file(s) ({freed // 2 ** 20} MB): {why}"] if freed else []
 
     async def keep_worker(self, log=print):
         """Runs forever: downloads files marked 'keep on this PC' and removes copies
@@ -1547,8 +1712,17 @@ class Drive:
             fresh = self.get_file_by_id(fid)
             if fresh is None or not fresh["keep"] or not fresh["path"].startswith("/"):
                 continue
-            if self._local_copy(fresh):
+            if self._kept_copy(fresh):
                 continue
+            recent = self._recent_copy(fresh)
+            if recent:                                   # opened lately: keep that copy
+                try:
+                    os.replace(recent, self.offline_path(fid))
+                    self.db.execute("DELETE FROM recent WHERE file_id=?", (fid,))
+                    self.db.commit()
+                    continue
+                except OSError:
+                    pass
             prog = self.keeping[fid] = {"path": fresh["path"], "done": 0, "total": fresh["size"]}
             try:
                 await self._download_row(fresh, self.offline_path(fid),
@@ -1621,7 +1795,7 @@ class Drive:
                 if raw:
                     sources.append(raw)
             if kind == "image" and row["size"] <= thumbs.SOURCE_LIMIT and not sources:
-                sources.append(b"".join([d async for d in self.iter_row(row)]))
+                sources.append(b"".join([d async for d in self.iter_row(row, remember=False)]))
             data = taken = None
             for src in sources:
                 try:

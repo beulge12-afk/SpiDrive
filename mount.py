@@ -77,8 +77,34 @@ def write_conf(dav_port):
         f.write(f"[{REMOTE}]\ntype = webdav\nurl = http://127.0.0.1:{dav_port}\nvendor = other\n")
 
 
-def mount_args(exe, letter):
+def rclone_version(exe):
+    """(major, minor) of rclone, or (0, 0) if it can't be told."""
+    import re
+    try:
+        out = subprocess.run([exe, "version"], capture_output=True, text=True, timeout=15).stdout
+        m = re.search(r"rclone v(\d+)\.(\d+)", out)
+        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    except (OSError, subprocess.SubprocessError):
+        return (0, 0)
+
+
+def min_free_space():
+    """rclone keeps this much of the disk free by dropping its least recently used
+    cached files (the same 10% SpiDrive keeps free for its own copies)."""
+    try:
+        total = shutil.disk_usage(DATA_DIR).total
+    except OSError:
+        return None
+    pct = float(getattr(config, "LOW_DISK_PERCENT", 10))
+    return f"{max(1, int(total * pct / 100 / 1024 ** 2))}M"
+
+
+def mount_args(exe, letter, version=(0, 0)):
     _, size_text = drive_size()
+    extra = []
+    free = min_free_space()
+    if version >= (1, 62) and free:                    # older rclone doesn't know the option
+        extra = ["--vfs-cache-min-free-space", free]
     return [
         exe, "mount", f"{REMOTE}:", letter,
         "--config", RCLONE_CONF,
@@ -91,6 +117,7 @@ def mount_args(exe, letter):
         "--vfs-disk-space-total-size", size_text,
         "--log-file", RCLONE_LOG,
         "--log-level", "NOTICE",
+        *extra,
     ]
 
 
@@ -147,7 +174,7 @@ class Mount:
             pass
         # Same console as SpiDrive: Ctrl+C reaches rclone too, so it unmounts cleanly.
         self.proc = await asyncio.create_subprocess_exec(
-            *mount_args(exe, self.letter), stdin=subprocess.DEVNULL,
+            *mount_args(exe, self.letter, await asyncio.to_thread(rclone_version, exe)), stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(60):                              # up to 30 s
             if letter_in_use(self.letter):

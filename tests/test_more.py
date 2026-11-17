@@ -326,7 +326,7 @@ async def test_server_endpoints(drive, aiohttp_client, monkeypatch, unused_tcp_p
     c = await aiohttp_client(app)
     await put(drive, "/a.txt", b"hello")
     r = await (await c.post("/api/uploads", json={"paused": True, "limit": 1024 * 1024})).json()
-    assert r == {"paused": True, "limit": 1024 * 1024}
+    assert r == {"paused": True, "limit": 1024 * 1024, "auto": False}
     s = await (await c.get("/api/stats")).json()
     assert s["uploads"]["paused"] and s["health"]["status"] == "not checked yet"
     r = await (await c.post("/api/links", json={"path": "/a.txt", "hours": 2})).json()
