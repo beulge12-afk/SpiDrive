@@ -219,6 +219,19 @@ Click the **paper-plane** button next to a file:
   on this PC. They use port 8001 (`SHARE_PORT`); the first time, Windows may ask to allow SpiDrive on
   private networks. That small server serves only these links, nothing else.
 
+## Your folders in Telegram
+
+Your storage channel has a pinned message, **📁 My Drive**. It lists the top folders and files; tap a
+folder to jump to its own message, which lists what is inside (with ⬆️ to go back up), and tap a file to
+jump to it. Big folders continue over several messages (*Next* / *Previous*). SpiDrive updates these
+messages about once a minute after you add, move or delete something, a few at a time, so a big change
+can take some minutes to show everywhere.
+
+Files that are encrypted (🔒) or split into parts (🧩) are listed by name but can't open in Telegram: send
+`/get` and the name to your Saved Messages to receive a normal copy. The lists show real file names even
+when encryption is on; turn them off in **Settings → Telegram** (the folder messages are then deleted) to
+keep names out of the channel.
+
 ## Control from your phone (Saved Messages)
 
 In Telegram on your phone, open **Saved Messages** (your chat with yourself) and send:

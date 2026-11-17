@@ -25,3 +25,4 @@ HEALTH_CHECK = True             # re-check random parts against their SHA-256 ev
 SHARE_PORT = 8001               # share links on the Wi-Fi
 UPLOAD_PARALLEL = 3             # small files uploading at the same time
 BACKUP_KEEP = 7                 # index backups kept in the channel
+TELEGRAM_FOLDERS = True         # one message per folder in the channel, under a pinned "My Drive"

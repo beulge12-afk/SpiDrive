@@ -17,6 +17,7 @@ Both show the same files. While it runs it also:
   - re-checks a few random parts against their SHA-256 (drive health)  (every hour)
   - answers /find, /get, /stats, /keep that you send to your Saved Messages
   - serves share links on your Wi-Fi (links.py), once you make one
+  - keeps one message per folder in the channel, under a pinned "My Drive" (every minute)
   - keeps SYNC_FOLDERS from config.py in two-way sync               (every 10 s)
   - sends files to Telegram contacts when you press Share
 """
@@ -38,6 +39,7 @@ import dav
 import keys
 import links
 import sync
+import tgfolders
 import webguard
 import zipper
 from phone import Phone
@@ -139,6 +141,7 @@ async def api_stats(req):
         "backup_encrypted": d._meta("last_backup_encrypted") == "1",
         "uploads": {"paused": d.paused, "limit": d.limit, "parallel": UPLOAD_PARALLEL},
         "links": len(d.links()),
+        "telegram_folders": req.app["tgfolders"].root_link() if "tgfolders" in req.app else None,
         "files": count, "bytes": total, "folders": folders,
         "incomplete": incomplete,
         "pending": s["pending"], "pending_bytes": s["pending_bytes"],
@@ -717,6 +720,7 @@ async def api_settings_get(req):
         "phone_commands": bool(getattr(config, "PHONE_COMMANDS", True)),
         "inbox_organize": bool(getattr(config, "INBOX_ORGANIZE", True)),
         "health_check": bool(getattr(config, "HEALTH_CHECK", True)),
+        "telegram_folders": bool(getattr(config, "TELEGRAM_FOLDERS", True)),
         "autostart": bool(getattr(config, "AUTOSTART", False)),
         "phone_access": HOST not in ("127.0.0.1", "localhost"),
         "has_web_password": bool(PASSWORD),
@@ -779,7 +783,7 @@ async def api_settings_post(req):
         else:
             pairs[local] = norm(remote or "/Sync")
     v["SYNC_FOLDERS"] = pairs
-    for key in ("PHONE_COMMANDS", "INBOX_ORGANIZE", "HEALTH_CHECK"):
+    for key in ("PHONE_COMMANDS", "INBOX_ORGANIZE", "HEALTH_CHECK", "TELEGRAM_FOLDERS"):
         if key.lower() in data:
             v[key] = bool(data[key.lower()])
 
@@ -1010,6 +1014,8 @@ async def amain(stop_event=None, interactive=True, hooks=None):
     web_app["syncer"] = syncer
     link_server = links.LinkServer(d, SHARE_PORT, log)
     web_app["links"] = link_server
+    folder_msgs = tgfolders.FolderMessages(d, log)
+    web_app["tgfolders"] = folder_msgs
     web_runner = web.AppRunner(web_app, access_log=None)
     await web_runner.setup()
 
@@ -1039,6 +1045,8 @@ async def amain(stop_event=None, interactive=True, hooks=None):
         ]
         if syncer.pairs:
             tasks.append(asyncio.create_task(every(sync.INTERVAL, syncer.run_once, "sync")))
+        tasks.append(asyncio.create_task(every(
+            60, lambda: folder_msgs.run(enabled=bool(getattr(config, "TELEGRAM_FOLDERS", True))), "telegram")))
         if getattr(config, "HEALTH_CHECK", True):
             tasks.append(asyncio.create_task(every(HEALTH_SECONDS, lambda: maybe_health(d), "health")))
         if getattr(config, "PHONE_COMMANDS", True):

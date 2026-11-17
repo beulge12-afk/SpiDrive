@@ -19,8 +19,8 @@ with us, and your encryption key never leaves your device.
 - **From Telegram to your drive.** Anything you send or forward to your storage channel from your phone
   appears in the drive within seconds.
 - **Large files.** Files bigger than Telegram's 2 GB limit are split into parts and joined again automatically.
-- **AES-256 encryption (optional).** Files are encrypted on your PC before they are uploaded. Even file
-  names are hidden in the channel.
+- **AES-256 encryption (optional).** Files are encrypted on your PC before they are uploaded, and their
+  parts get meaningless names (the folder messages below still list real names; turn them off to hide them).
 - **Trash and earlier versions.** Deleted files wait in the Trash for 30 days, and replaced files keep
   their previous versions. Restore either from the dashboard.
 - **Photos timeline.** Photos and videos grouped by month, with small previews, so browsing doesn't
@@ -39,6 +39,8 @@ with us, and your encryption key never leaves your device.
 
 **Telegram-powered**
 
+- **Your folders in the channel.** A pinned **📁 My Drive** message lists your folders and files as links;
+  tap a folder to open its own message. Kept up to date as you add, move and delete.
 - **Phone control through Saved Messages.** Send `/find`, `/get`, `/stats` or `/keep` to yourself, and your
   PC replies with the file or answer. It works from anywhere, with no open ports.
 - **Auto-organized Telegram Inbox.** Files you send from your phone are filed into folders like
@@ -130,6 +132,7 @@ messages belong to which file. Encryption uses AES-256-CTR with a key derived fr
 | `webguard.py` | Stops other websites from using SpiDrive's local servers |
 | `keys.py` | Master key, passphrase and recovery key, encrypted index backups |
 | `phone.py` | `/find`, `/get`, `/stats`, `/keep` in Saved Messages |
+| `tgfolders.py` | One message per folder in the channel, under a pinned "My Drive" |
 | `links.py` | Share links on the Wi-Fi (their own small server: nothing else is reachable) |
 | `tests/` | Tests (`pip install pytest pytest-aiohttp`, then `pytest`) |
 | `server.py` | Web dashboard and its API |

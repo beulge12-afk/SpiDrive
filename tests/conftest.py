@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 cfg = types.ModuleType("config")
-cfg.__dict__.update(API_ID=1, API_HASH="x", PHONE="+1", CHANNEL="-1001", DATA_DIR=os.path.join(ROOT, ".test-data"),
+cfg.__dict__.update(API_ID=1, API_HASH="x", PHONE="+1", CHANNEL="-1001001", DATA_DIR=os.path.join(ROOT, ".test-data"),
                     CHUNK_SIZE=64 * 1024, ENCRYPT=False, PASSPHRASE="", WEB_PORT=8000, DAV_PORT=8080,
                     PROXY_MODE="off")
 sys.modules["config"] = cfg
@@ -81,6 +81,21 @@ class FakeClient:
             if m is None or mid <= min_id or (search and search not in (m.message or "")):
                 continue
             yield m
+
+    async def send_message(self, chat, text, **kw):
+        m = self.add(b"", text)
+        m.media = None
+        return m
+
+    async def edit_message(self, chat, msg_id, text, **kw):
+        m = self.msgs.get(msg_id)
+        if m is None:
+            raise type("MessageIdInvalidError", (Exception,), {})("message not found")
+        m.message = text
+        return m
+
+    async def pin_message(self, chat, msg_id, notify=False):
+        self.pinned = msg_id
 
     async def get_me(self):
         return types.SimpleNamespace(premium=False, first_name="Me")

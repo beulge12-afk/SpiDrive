@@ -215,6 +215,10 @@ class Drive:
             c.add_event_handler(callback, event)
         return c
 
+    def channel_id(self):
+        """The storage channel's id, like -1001234567890."""
+        return int(str(config.CHANNEL).strip())
+
     def on_event(self, callback, event):
         """Listen to Telegram updates (also after the connection is switched)."""
         self._handlers.append((callback, event))

@@ -294,7 +294,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
     <div class="meta" id="sMeta"></div>
     <div class="card2" id="hCard"></div>
     <div class="hint">
-      <b>Send from Telegram:</b> forward or send any file to the <b id="chan2">MyDrive</b> channel and it appears in <b>Telegram Inbox</b> within a few seconds.
+      <span id="tgFoldersHint"></span><b>Send from Telegram:</b> forward or send any file to the <b id="chan2">MyDrive</b> channel and it appears in <b>Telegram Inbox</b> within a few seconds.
       <div><button class="btn sm" id="syncNow">Check now</button></div>
     </div>
     <div class="hint" style="margin-top:0">
@@ -387,6 +387,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
       <div class="line" style="margin-top:8px"><button class="btn sm" id="sAddPair">Add a folder</button><span id="sKnown" class="line"></span></div>
       <h3>Telegram</h3>
       <label class="chk"><input type="checkbox" id="sPhoneCmd"> Answer /find, /get, /stats and /keep in my Saved Messages</label>
+      <label class="chk"><input type="checkbox" id="sTgFolders"> Show my folders in the channel (a pinned 📁 My Drive message, with one message per folder)</label>
       <label class="chk"><input type="checkbox" id="sOrganize"> Sort files sent from Telegram into folders (Photos/2026-11, Videos, Voice, Docs…)</label>
       <h3>Connection to Telegram</h3>
       <label class="f" for="sPMode">How to connect</label>
@@ -1228,6 +1229,7 @@ async function loadStats() {
       (s.pending ? `<div><span>Waiting to upload</span><b class="pill warn">${s.pending} · ${fmtSize(s.pending_bytes)}</b></div>` : '') +
       (s.incomplete ? `<div><span>Interrupted uploads</span><b class="pill warn">${s.incomplete}</b></div>` : '');
     renderHealth(s.health);
+    $('#tgFoldersHint').innerHTML = s.telegram_folders ? `<b>Your folders in Telegram:</b> open the pinned <a href="${esc(s.telegram_folders)}" target="_blank" rel="noopener">📁 My Drive</a> message in the channel and tap a folder to open it.<br><br>` : '';
     if (s.pending && !up.polling) poll();
   } catch (e) { $('#chan').textContent = 'Not connected'; }
 }
@@ -1259,7 +1261,7 @@ async function openSettings() {
   const used = new Set(s.sync.map(p => p.local.toLowerCase()));
   $('#sKnown').innerHTML = Object.entries(s.known_folders || {}).filter(([, v]) => !used.has(v.toLowerCase()))
     .map(([k, v]) => `<button class="btn sm ghost" data-known="${esc(v)}" data-label="${esc(k)}" title="${esc(v)}">+ Back up ${esc(k)}</button>`).join('');
-  $('#sPhoneCmd').checked = s.phone_commands; $('#sOrganize').checked = s.inbox_organize; $('#sHealth').checked = s.health_check;
+  $('#sTgFolders').checked = s.telegram_folders; $('#sPhoneCmd').checked = s.phone_commands; $('#sOrganize').checked = s.inbox_organize; $('#sHealth').checked = s.health_check;
   $('#sKeyBox').style.display = s.has_passphrase ? '' : 'none';
   $('#sKeyInfo').innerHTML = s.recovery_key ? `Recovery key made ${esc(fmtDate(s.recovery_key))}. Keep the printout somewhere safe.` : 'No recovery key yet. Make one and print it: it opens your files and the index backup if you ever forget the passphrase.';
   $('#sRecovery').textContent = s.recovery_key ? 'New recovery key' : 'Create recovery key';
@@ -1289,7 +1291,7 @@ $('#setSave').onclick = async () => {
     proxy_mode: $('#sPMode').value, proxy_link: $('#sPLink').value.trim(),
     proxy_sources: $('#sPSources').value.split('\n').map(x => x.trim()).filter(Boolean),
     sync: [...document.querySelectorAll('#sPairs .pair')].map(r => ({ local: r.querySelector('.pl').value, remote: r.querySelector('.pr').value, mode: r.querySelector('.pm').value })),
-    phone_commands: $('#sPhoneCmd').checked, inbox_organize: $('#sOrganize').checked, health_check: $('#sHealth').checked,
+    telegram_folders: $('#sTgFolders').checked, phone_commands: $('#sPhoneCmd').checked, inbox_organize: $('#sOrganize').checked, health_check: $('#sHealth').checked,
   };
   try {
     const r = await api('/api/settings', body);
