@@ -21,6 +21,17 @@ Every 10 seconds SpiDrive compares the local folder with the drive folder:
 A file counts as unchanged when its size and modified time are the same as
 at the last sync. Nothing is ever deleted outright by sync: both trashes can
 be emptied by hand.
+
+Backup-only folders (for Documents, Pictures, ...) only go one way:
+
+    SYNC_FOLDERS = {
+        r"C:\\Users\\me\\Documents": {"remote": "/Backup/Documents", "mode": "backup"},
+    }
+
+  - new or changed on the PC      -> uploaded (the older drive copy is kept as a version)
+  - missing on the drive          -> uploaded again
+  - deleted on the PC             -> the drive copy stays
+  - anything done on the drive    -> never comes back to the PC
 """
 import asyncio
 import os
@@ -63,11 +74,19 @@ def skip_name(name):
     return n in SKIP_NAMES or n.startswith(SKIP_PREFIX) or n.endswith(SKIP_SUFFIX)
 
 
+def parse_target(value):
+    """A SYNC_FOLDERS value -> (drive folder, 'sync' or 'backup')."""
+    if isinstance(value, dict):
+        mode = "backup" if str(value.get("mode", "sync")).lower() == "backup" else "sync"
+        return norm(str(value.get("remote") or ("/Backup" if mode == "backup" else "/Sync"))), mode
+    return norm(str(value)), "sync"
+
+
 def configured_pairs():
     raw = getattr(config, "SYNC_FOLDERS", None) or {}
     if isinstance(raw, (list, tuple)):
         raw = dict(raw)
-    return [(os.path.abspath(os.path.expanduser(str(l))), norm(str(r))) for l, r in raw.items()]
+    return [(os.path.abspath(os.path.expanduser(str(l))), *parse_target(r)) for l, r in raw.items()]
 
 
 def scan_local(root):
@@ -104,12 +123,12 @@ class Syncer:
         self.status = {}
         self._init_db()
         taken = []
-        for local, remote in configured_pairs():
+        for local, remote, mode in configured_pairs():
             problem = self._check_pair(local, remote, taken)
             if problem:
                 self.log(f"sync: skipping {local} -> {remote}: {problem}")
                 continue
-            taken.append((local, remote))
+            taken.append((local, remote, mode))
         self.pairs = taken
 
     # ---------- setup
@@ -136,7 +155,7 @@ class Syncer:
             return "pick a folder, not a whole disk"
         if remote == TRASH_REMOTE or remote.startswith(TRASH_REMOTE + "/"):
             return "cannot sync the trash"
-        for l2, r2 in taken:
+        for l2, r2, *_ in taken:
             if inside(local, l2) or inside(l2, local):
                 return f"overlaps with {l2}"
             if remote == r2 or remote.startswith(r2.rstrip("/") + "/") or r2.startswith(remote.rstrip("/") + "/"):
@@ -144,7 +163,8 @@ class Syncer:
         return None
 
     def describe(self):
-        return [{"local": l, "remote": r, "status": self.status.get(r, "waiting")} for l, r in self.pairs]
+        return [{"local": l, "remote": r, "mode": m, "status": self.status.get(r, "waiting")}
+                for l, r, m in self.pairs]
 
     # ---------- state
 
@@ -262,9 +282,12 @@ class Syncer:
 
     async def run_once(self):
         actions = []
-        for local, remote in self.pairs:
+        for local, remote, mode in self.pairs:
             try:
-                actions += await self._sync_pair(local, remote)
+                if mode == "backup":
+                    actions += await self._backup_pair(local, remote)
+                else:
+                    actions += await self._sync_pair(local, remote)
             except Exception as e:                       # keep the other pairs going
                 self.status[remote] = f"error: {e}"
                 self._warn(remote, f"sync {local} failed: {e!r}")
@@ -275,6 +298,42 @@ class Syncer:
         if tag not in self.warned:
             self.warned.add(tag)
             self.log(msg)
+
+    async def _backup_pair(self, root, rroot):
+        """One way, PC -> drive. Never downloads, never deletes on the drive."""
+        pair, did = rroot, []
+        st_files, _ = self._state(pair)
+        if not os.path.isdir(root):
+            self.status[pair] = "paused" if st_files else "folder not found"
+            self._warn(("missing", root), f"backup: {root} is missing (unplugged disk?). Paused.")
+            return did
+        self.warned.discard(("missing", root))
+        if not self.d.is_dir(rroot):
+            self.d.mkdir(rroot)
+        lf, ld, busy = await asyncio.to_thread(scan_local, root)
+        rf, rd = self._scan_remote(rroot)
+        for k, (rel, size, mtime) in sorted(lf.items()):
+            if k in busy:
+                continue
+            s = st_files.get(k)
+            if s is not None and same((size, mtime), s[1:]) and k in rf:
+                continue
+            try:
+                size, mtime = await self._send(rroot, rel, self._lpath(root, rel))
+                self._remember(pair, rel, size, mtime)
+                did.append(f"backed up: {rel}")
+            except BlockingIOError:
+                pass                                         # still changing: next round
+            except (OSError, IsADirectoryError) as e:
+                self._warn(("up", pair, k), f"backup: cannot upload {rel}: {e}")
+        for k in set(st_files) - set(lf):
+            self._forget(pair, k)                            # deleted on the PC: the drive copy stays
+        for k, rel in ld.items():
+            if k not in rd:
+                self.d.mkdir(self._rpath(rroot, rel))
+        self.d.db.commit()
+        self.status[pair] = f"backed up ({time.strftime('%H:%M')})"
+        return did
 
     async def _sync_pair(self, root, rroot):
         pair, did = rroot, []

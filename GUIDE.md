@@ -135,6 +135,12 @@ Add `SYNC_FOLDERS` to `config.py` and restart. Every 10 seconds:
 | Delete on the drive | Moves the PC copy to `data\sync-trash` (emptied after 30 days) |
 | Change the same file on both sides | Keeps both: your PC copy becomes `name (conflict date).ext` |
 
+**Backup only** (for Documents, Pictures, ...): choose *Backup only* for a folder in Settings, or click
+**+ Back up Documents** / **+ Back up Pictures**. New and changed files on the PC are uploaded (the older
+drive copy is kept as a version), a file missing on the drive is uploaded again, deleting on the PC never
+deletes the drive copy, and nothing ever downloads back to the PC. In `config.py`:
+`SYNC_FOLDERS = {r"C:\Users\me\Documents": {"remote": "/Backup/Documents", "mode": "backup"}}`
+
 Sync never deletes anything permanently: files deleted on the PC wait in the dashboard's **Trash** for 30 days. (Older SpiDrive versions used a `/SpiDrive Trash` folder; it is still left alone by sync.) If the PC folder disappears (for example, an unplugged USB disk), sync pauses instead of deleting anything. Tip: syncing `/Telegram Inbox` brings everything you send from your phone straight into a folder on your PC.
 
 ## Trash and earlier versions
@@ -201,7 +207,71 @@ Dates are when a photo was taken, otherwise the file's date.
 
 ## Sharing a file
 
-In the dashboard, click the **paper-plane** button next to a file and type an **@username**, a phone number saved in your Telegram contacts, or **me** (your Saved Messages). The recipient gets a normal, readable file. Encrypted and split files are decrypted and joined first. Telegram's limit for one file is 2 GB (4 GB with Premium).
+Click the **paper-plane** button next to a file:
+
+- **Send on Telegram:** type an **@username**, a phone number saved in your Telegram contacts, or **me**
+  (your Saved Messages). The recipient gets a normal, readable file. Encrypted and split files are decrypted
+  and joined first. Telegram's limit for one file is 2 GB (4 GB with Premium).
+- **Link on this Wi-Fi:** choose how long it works (1 hour to 30 days) and click **Create link**. It is
+  copied for you, like `http://192.168.1.20:8001/s/Xk3f9QaB2mPz`. Anyone on the same network who opens it
+  sees the file (photos, music and video play in the browser) and a Download button. The dialog lists
+  the file's links with their download count; **Remove** stops one at once. Links work while SpiDrive runs
+  on this PC. They use port 8001 (`SHARE_PORT`); the first time, Windows may ask to allow SpiDrive on
+  private networks. That small server serves only these links, nothing else.
+
+## Control from your phone (Saved Messages)
+
+In Telegram on your phone, open **Saved Messages** (your chat with yourself) and send:
+
+| Command | What your PC does |
+|---|---|
+| `/find invoice 2026` | Lists matching files, numbered (all search filters work: `/find type:video size:>1gb`) |
+| `/get 2` | Sends result 2 of the last `/find` to Saved Messages. `/get /Docs/a.pdf` or `/get <words>` also work |
+| `/keep 2` | Keeps that file on the PC, so it opens without Telegram |
+| `/stats` | Storage used, uploads waiting, trash, drive health, last index backup |
+| `/help` | The list of commands |
+
+It works from anywhere, through your own Telegram account: no port is opened and nothing listens on the
+internet. Only your own Saved Messages are read. The PC must be on with SpiDrive running; commands sent
+while it is off are not answered later. Turn it off in **Settings → Telegram**.
+
+## Telegram Inbox folders
+
+Files you send or forward to the storage channel are filed by type inside **Telegram Inbox**:
+`Photos/2026-11` and `Videos/2026-11` (by month), `Voice` (voice messages), `Music`, `Docs` and `Other`.
+Turn it off in **Settings → Telegram** to keep everything in the Inbox itself.
+
+## Uploads: pause, speed limit, duplicates
+
+The upload panel (bottom right) has **Pause** and a **Speed** limit. Paused files wait on this PC (they
+are already in the drive and open normally) and continue from their last finished part when you resume.
+Up to 3 small files upload at the same time; files over 20 MB go one at a time.
+
+Before uploading, SpiDrive checks whether a file with exactly the same content is already in the channel
+(comparing the SHA-256 of each part). If it is, the new file points at it and is "uploaded" instantly,
+without using more space. A file saved again without changes doesn't create a new version.
+**Duplicates** in the sidebar lists identical files on the drive and how much is stored more than once;
+**Select extra copies** keeps the oldest of each.
+
+## Encryption keys and the recovery key
+
+Your files are encrypted with one key, which your passphrase unlocks. So in **Settings → Encryption**:
+
+- **Change passphrase** takes a second: no file is encrypted again. You need the current passphrase or
+  the recovery key.
+- **Create recovery key** shows a key like `K3Z4-6N6E-...` once. Print it or write it down. It unlocks
+  your files if you forget the passphrase (*Change passphrase → Use your recovery key*), also on a new PC.
+
+With a passphrase set, the daily **index backup** in the channel is encrypted too, so the channel shows
+no file names at all. The sidebar says whether the last backup was encrypted. Only the newest 7 backups
+are kept (`BACKUP_KEEP`).
+
+## Drive health
+
+Every hour SpiDrive downloads a few random parts again (up to 64 MB, parts not checked recently first)
+and compares them with the SHA-256 saved when they were uploaded. The **Drive health** card in the sidebar
+shows how much was verified in the last 30 days, and **See problems** lists anything damaged or missing.
+**Check now** runs a check at once. Turn the hourly check off in **Settings → General**.
 
 ## On your phone
 
@@ -214,7 +284,10 @@ Set `WEB_HOST = "0.0.0.0"` and a `WEB_PASSWORD`, restart SpiDrive, and open `htt
   venv\Scripts\activate
   python drive.py restore-index
   ```
-  Close SpiDrive first. Your old index is kept as a copy.
+  Close SpiDrive first. Your old index is kept as a copy. An encrypted backup asks for your passphrase or
+  your recovery key; with the recovery key, it also asks you to choose a new passphrase.
+- **Change the passphrase when running from config.py:** `python drive.py change-passphrase`, then put the
+  new one in `config.py`.
 - **S: doesn't appear:** the SpiDrive window prints the reason. rclone's own log is `data\rclone.log`.
 - **"FloodWait" pauses:** Telegram is limiting upload speed. SpiDrive waits and continues on its own.
 - **Uploads stuck "retrying":** check your internet. SpiDrive keeps retrying.

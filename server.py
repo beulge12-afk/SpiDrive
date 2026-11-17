@@ -14,6 +14,9 @@ Both show the same files. While it runs it also:
   - backs up the index to the channel                              (every 24 h)
   - empties trash items and old versions after TRASH_DAYS days      (every hour)
   - downloads files you chose to keep on this PC
+  - re-checks a few random parts against their SHA-256 (drive health)  (every hour)
+  - answers /find, /get, /stats, /keep that you send to your Saved Messages
+  - serves share links on your Wi-Fi (links.py), once you make one
   - keeps SYNC_FOLDERS from config.py in two-way sync               (every 10 s)
   - sends files to Telegram contacts when you press Share
 """
@@ -32,10 +35,13 @@ from aiohttp import web
 
 import config
 import dav
+import keys
+import links
 import sync
 import webguard
 import zipper
-from drive_core import BASE_DIR, DATA_DIR, LIVE, TRASH_DAYS, Drive, norm
+from phone import Phone
+from drive_core import BASE_DIR, DATA_DIR, LIVE, TRASH_DAYS, UPLOAD_PARALLEL, Drive, norm
 from mount import Mount
 from search import kind_of
 
@@ -46,6 +52,8 @@ PASSWORD = getattr(config, "WEB_PASSWORD", "")      # optional; required if you 
 INDEX_HTML = os.path.join(BASE_DIR, "web", "index.html")
 SYNC_SECONDS = 15
 PRUNE_SECONDS = 600
+HEALTH_SECONDS = 3600
+SHARE_PORT = int(getattr(config, "SHARE_PORT", 8001))
 BACKUP_SECONDS = 24 * 3600
 
 def file_json(r, d=None):
@@ -73,6 +81,11 @@ routes = web.RouteTableDef()
 
 def drive_of(req) -> Drive:
     return req.app["drive"]
+
+
+def channel_title(d):
+    t = getattr(d.channel, "title", "")
+    return t if isinstance(t, str) else ""
 
 
 @routes.get("/")
@@ -120,7 +133,12 @@ async def api_stats(req):
                   | {p for (p,) in d.db.execute("SELECT path FROM dirs")})
     s = d.stats()
     last_backup = d._meta("last_backup")
+    h = d.health()
     return web.json_response({
+        "health": {k: h[k] for k in ("status", "percent", "last_check", "running")} | {"problems": len(h["problems"])},
+        "backup_encrypted": d._meta("last_backup_encrypted") == "1",
+        "uploads": {"paused": d.paused, "limit": d.limit, "parallel": UPLOAD_PARALLEL},
+        "links": len(d.links()),
         "files": count, "bytes": total, "folders": folders,
         "incomplete": incomplete,
         "pending": s["pending"], "pending_bytes": s["pending_bytes"],
@@ -128,7 +146,7 @@ async def api_stats(req):
         "versions": s["versions"], "versions_bytes": s["versions_bytes"], "trash_days": TRASH_DAYS,
         "kinds": kinds, "messages": d.db.execute("SELECT COUNT(DISTINCT msg_id) FROM chunks").fetchone()[0],
         "encryption": bool(config.ENCRYPT),
-        "channel": getattr(d.channel, "title", ""),
+        "channel": channel_title(d),
         "last_backup": float(last_backup) if last_backup else None,
         "drive": f"http://localhost:{DAV_PORT}",
         "sync": req.app["syncer"].describe(),
@@ -141,11 +159,12 @@ async def api_stats(req):
 async def api_jobs(req):
     """Upload queue for the dashboard's panel (includes files copied in File Explorer)."""
     d = drive_of(req)
-    cur = d.current_pending_id()
+    cur = d.active_ids()
     jobs = []
     for p in d.pending():
         prog = d.progress.get(p["id"], {})
-        state = "uploading" if p["id"] == cur else ("retry" if prog.get("error") else "queued")
+        state = "uploading" if p["id"] in cur else "paused" if d.paused else (
+            "retry" if prog.get("error") else "queued")
         jobs.append({"id": f"p{p['id']}", "path": p["path"], "state": state,
                      "done": prog.get("done", 0), "total": prog.get("total", p["size"]),
                      "error": prog.get("error"), "t": p["created"]})
@@ -160,7 +179,19 @@ async def api_jobs(req):
         if r["t"] >= cutoff:
             jobs.append({"id": f"r{int(r['t'] * 1000)}-{i}", "path": r["path"], "state": r["state"],
                          "done": r["total"], "total": r["total"], "error": r["error"], "t": r["t"]})
-    return web.json_response({"jobs": jobs})
+    return web.json_response({"jobs": jobs, "paused": d.paused, "limit": d.limit})
+
+
+@routes.post("/api/uploads")
+async def api_upload_controls(req):
+    """{paused: bool, limit: bytes per second (0 = no limit)}"""
+    data = await req.json()
+    d = drive_of(req)
+    limit = data.get("limit")
+    if limit is not None and not (0 <= int(limit) <= 10 ** 10):
+        raise ValueError("Unknown speed limit.")
+    d.set_upload_controls(paused=data.get("paused"), limit=limit)
+    return web.json_response({"paused": d.paused, "limit": d.limit})
 
 
 @routes.post("/api/upload")
@@ -522,6 +553,127 @@ async def manifest(req):
     }, content_type="application/manifest+json")
 
 
+# ---------------------------------------------------------------- duplicates, health, keys, links
+
+@routes.get("/api/duplicates")
+async def api_duplicates(req):
+    d = drive_of(req)
+    groups = d.duplicates()
+    for g in groups:
+        g["files"] = [file_json(f, d) for f in g["files"]]
+    return web.json_response({"groups": groups, "extra_bytes": sum(g["extra_bytes"] for g in groups)})
+
+
+@routes.get("/api/health")
+async def api_health(req):
+    return web.json_response(drive_of(req).health())
+
+
+@routes.post("/api/health/check")
+async def api_health_check(req):
+    d = drive_of(req)
+    if not d.health_running:
+        async def run():
+            try:
+                found = await d.health_check(log=log)
+                log(f"health: checked, {len(found)} problem(s)")
+            except Exception as e:
+                log(f"health check failed: {e!r}")
+        req.app["share_tasks"].add(t := asyncio.create_task(run()))
+        t.add_done_callback(req.app["share_tasks"].discard)
+    return web.json_response({"running": True})
+
+
+@routes.get("/api/keys")
+async def api_keys(req):
+    d = drive_of(req)
+    return web.json_response(d.key_status() | {"has_passphrase": bool(config.PASSPHRASE), "editable": app_mode()})
+
+
+@routes.post("/api/keys/passphrase")
+async def api_change_passphrase(req):
+    """{current or recovery_key, new}: re-wraps the key, no file is re-encrypted."""
+    if not app_mode():
+        raise ValueError("SpiDrive was started from the command line: use  python drive.py change-passphrase.")
+    import settings as store
+    data = await req.json()
+    d = drive_of(req)
+    new = data.get("new") or ""
+    d.change_passphrase(new, current=data.get("current"), recovery_key=data.get("recovery_key"))
+    v = store.load()
+    v["PASSPHRASE"] = new
+    store.save(v)
+    config.PASSPHRASE = new
+    if d.has_key():
+        try:
+            await d.backup_index()                   # so the channel's backup opens with the new one
+        except Exception as e:
+            log(f"backup after changing the passphrase failed: {e!r}")
+    return web.json_response({"ok": True})
+
+
+@routes.post("/api/keys/recovery")
+async def api_recovery_key(req):
+    d = drive_of(req)
+    if not config.PASSPHRASE:
+        raise ValueError("Set an encryption passphrase first (Settings, Encryption).")
+    rk = d.create_recovery_key()
+    try:
+        await d.backup_index()                       # the backup now opens with the recovery key too
+    except Exception as e:
+        log(f"backup after creating a recovery key failed: {e!r}")
+    return web.json_response({"recovery_key": rk, "created": d.key_status()["recovery"]})
+
+
+def link_json(req, r):
+    return {"token": r["token"], "path": r["path"], "url": req.app["links"].url(r["token"]),
+            "expires": r["expires"], "created": r["created"], "downloads": r["downloads"]}
+
+
+@routes.get("/api/links")
+async def api_links(req):
+    d = drive_of(req)
+    path = req.query.get("path")
+    return web.json_response({"links": [link_json(req, r) for r in d.links(path)]})
+
+
+@routes.post("/api/links")
+async def api_links_create(req):
+    data = await req.json()
+    d = drive_of(req)
+    token, _ = d.create_link(norm(data["path"]), float(data.get("hours", 24)))
+    await req.app["links"].ensure()
+    r = d.db.execute("SELECT * FROM links WHERE token=?", (token,)).fetchone()
+    return web.json_response(link_json(req, r))
+
+
+@routes.post("/api/links/revoke")
+async def api_links_revoke(req):
+    data = await req.json()
+    drive_of(req).revoke_link(str(data.get("token", "")))
+    return web.json_response({"ok": True})
+
+
+def known_folders():
+    """This PC's Documents and Pictures folders (offered as backup-only folders)."""
+    out = {}
+    if os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                for label, name in (("Documents", "Personal"), ("Pictures", "My Pictures")):
+                    try:
+                        out[label] = os.path.expandvars(winreg.QueryValueEx(k, name)[0])
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    for label in ("Documents", "Pictures"):
+        out.setdefault(label, os.path.join(os.path.expanduser("~"), label))
+    return {k: v for k, v in out.items() if os.path.isdir(v)}
+
+
 # ---------------------------------------------------------------- settings page
 
 import re
@@ -556,14 +708,20 @@ async def api_settings_get(req):
         "encrypt": bool(config.ENCRYPT),
         "has_passphrase": bool(config.PASSPHRASE),
         "encrypted_files": enc_files,
-        "passphrase_locked": d._meta("key_check") is not None,
+        "passphrase_locked": d.has_key(),
+        "recovery_key": d.key_status()["recovery"],
         "chunk_mb": int(config.CHUNK_SIZE) // (1024 * 1024),
-        "sync": [{"local": l, "remote": r} for l, r in pairs.items()],
+        "sync": [{"local": l, "remote": t[0], "mode": t[1]} for l, t in
+                 ((l, sync.parse_target(r)) for l, r in pairs.items())],
+        "known_folders": known_folders(),
+        "phone_commands": bool(getattr(config, "PHONE_COMMANDS", True)),
+        "inbox_organize": bool(getattr(config, "INBOX_ORGANIZE", True)),
+        "health_check": bool(getattr(config, "HEALTH_CHECK", True)),
         "autostart": bool(getattr(config, "AUTOSTART", False)),
         "phone_access": HOST not in ("127.0.0.1", "localhost"),
         "has_web_password": bool(PASSWORD),
         "data_dir": DATA_DIR,
-        "channel": getattr(d.channel, "title", ""),
+        "channel": channel_title(d),
         "web_port": PORT,
         "proxy_mode": d.proxy.mode,
         "proxy_link": str(getattr(config, "PROXY", "") or ""),
@@ -601,9 +759,8 @@ async def api_settings_post(req):
     if new_pass:
         if len(new_pass) < 8:
             raise ValueError("The encryption passphrase must have at least 8 characters.")
-        if v["PASSPHRASE"] and new_pass != v["PASSPHRASE"] and d._meta("key_check") is not None:
-            raise ValueError("The passphrase cannot be changed: files were already encrypted with the "
-                             "current one and could not be opened any more.")
+        if v["PASSPHRASE"] and new_pass != v["PASSPHRASE"] and d.has_key():
+            raise ValueError("Use 'Change passphrase' to change it: it needs the current one.")
         v["PASSPHRASE"] = new_pass
     if want_enc and not v["PASSPHRASE"]:
         raise ValueError("Choose an encryption passphrase to turn encryption on.")
@@ -616,8 +773,15 @@ async def api_settings_post(req):
             continue
         if not os.path.isabs(local):
             raise ValueError(f"Sync folder '{local}' must be a full path, like D:\\SpiDrive Sync.")
-        pairs[local] = norm(remote or "/Sync")
+        if p.get("mode") == "backup":
+            pairs[local] = {"remote": norm(remote or "/Backup/" + os.path.basename(local.rstrip("\\/"))),
+                            "mode": "backup"}
+        else:
+            pairs[local] = norm(remote or "/Sync")
     v["SYNC_FOLDERS"] = pairs
+    for key in ("PHONE_COMMANDS", "INBOX_ORGANIZE", "HEALTH_CHECK"):
+        if key.lower() in data:
+            v[key] = bool(data[key.lower()])
 
     v["AUTOSTART"] = bool(data.get("autostart"))
 
@@ -786,6 +950,30 @@ async def watch_connection(d):
                     log(f"connection: switching failed: {e2!r}")
 
 
+async def maybe_health(d):
+    """Hourly: re-check a few random parts, unless uploads are busy."""
+    if d.active_ids() or d.paused:
+        return None
+    found = await d.health_check(log=log)
+    return [f"problem: {p}" for p in found]
+
+
+async def phone_send(app, d, path):
+    """/get from the phone: send the file to Saved Messages, like Share does."""
+    job = {"id": f"s{uuid.uuid4().hex[:10]}", "path": f"{path}  →  Saved Messages", "state": "sharing",
+           "done": 0, "total": 0, "error": None, "t": time.time()}
+    app["shares"].append(job)
+    del app["shares"][:-50]
+    try:
+        await share_file(d, job, path, "me")
+        job["state"] = "done"
+    except Exception as e:
+        job["state"], job["error"] = "error", str(e) or type(e).__name__
+        raise
+    finally:
+        job["t"], job["done"] = time.time(), job["total"]
+
+
 async def maybe_backup(d):
     last = d._meta("last_backup")
     if last is None or time.time() - float(last) > BACKUP_SECONDS:
@@ -820,6 +1008,8 @@ async def amain(stop_event=None, interactive=True, hooks=None):
     web_app["share_tasks"] = set()
     syncer = sync.Syncer(d, log)
     web_app["syncer"] = syncer
+    link_server = links.LinkServer(d, SHARE_PORT, log)
+    web_app["links"] = link_server
     web_runner = web.AppRunner(web_app, access_log=None)
     await web_runner.setup()
 
@@ -849,6 +1039,16 @@ async def amain(stop_event=None, interactive=True, hooks=None):
         ]
         if syncer.pairs:
             tasks.append(asyncio.create_task(every(sync.INTERVAL, syncer.run_once, "sync")))
+        if getattr(config, "HEALTH_CHECK", True):
+            tasks.append(asyncio.create_task(every(HEALTH_SECONDS, lambda: maybe_health(d), "health")))
+        if getattr(config, "PHONE_COMMANDS", True):
+            Phone(d, send_file=lambda path: phone_send(web_app, d, path), log=log).attach()
+            log("phone:         send /help to your Saved Messages in Telegram")
+        if d.links():
+            try:
+                await link_server.ensure()               # links made before a restart keep working
+            except RuntimeError as e:
+                log(str(e))
         me = await d.client.get_me()
         log(f"logged in as {me.first_name}, channel '{getattr(d.channel, 'title', '?')}'")
         waiting = d.stats()["pending"]
@@ -860,8 +1060,8 @@ async def amain(stop_event=None, interactive=True, hooks=None):
             log(f"Windows drive: {letter} is ready (open This PC in File Explorer)")
         elif dav_ok:
             log(f"Windows drive: http://localhost:{DAV_PORT}   (run setup_rclone.bat once to give it a letter)")
-        for l, r in syncer.pairs:
-            log(f"sync:          {l}  <->  {r}")
+        for l, r, m in syncer.pairs:
+            log(f"{'backup:        ' + l + '  ->  ' + r if m == 'backup' else 'sync:          ' + l + '  <->  ' + r}")
         if stop_event is None:
             log("keep this window open. Ctrl+C stops SpiDrive.")
         else:
@@ -872,6 +1072,7 @@ async def amain(stop_event=None, interactive=True, hooks=None):
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await link_server.stop()
         await dav_runner.cleanup()
         await web_runner.cleanup()
         await d.close()

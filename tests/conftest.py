@@ -1,6 +1,8 @@
 """Test setup: a throwaway config, and a fake Telegram client that keeps messages in memory."""
 import asyncio
 import contextlib
+import datetime
+import inspect
 import os
 import sys
 import types
@@ -25,8 +27,13 @@ class FakeMedia:
 
 
 class FakeMsg:
-    def __init__(self, mid, data, caption="", thumb=None):
-        self.id, self.media, self.message = mid, FakeMedia(data, thumb), caption
+    def __init__(self, mid, data, caption="", thumb=None, name=None, media=None, voice=None, date=None):
+        self.id, self.message = mid, caption
+        self.media = media if media is not None else FakeMedia(data, thumb)
+        self.media.data, self.media.thumb = data, thumb
+        self.file = types.SimpleNamespace(name=name, size=len(data), ext=os.path.splitext(name or "")[1] or ".bin")
+        self.voice = voice
+        self.date = date or datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)
 
 
 class FakeClient:
@@ -34,22 +41,49 @@ class FakeClient:
 
     def __init__(self):
         self.msgs, self.next_id = {}, 1
+        self.delay, self.active, self.max_active, self.sent_to = 0, 0, 0, []
 
     async def upload_file(self, reader, file_size=None, file_name=None, part_size_kb=None, progress_callback=None):
-        out = bytearray()
-        while True:
-            b = reader.read(7000)
-            if not b:
-                break
-            out += b
-        return bytes(out)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            out = bytearray()
+            while True:
+                b = reader.read(16 * 1024)
+                if not b:
+                    break
+                out += b
+                if self.delay:
+                    await asyncio.sleep(self.delay)
+                if progress_callback:
+                    r = progress_callback(len(out), file_size)
+                    if inspect.isawaitable(r):
+                        await r
+            return bytes(out)
+        finally:
+            self.active -= 1
 
-    async def send_file(self, chat, file, caption="", **kw):
-        data = file if isinstance(file, bytes) else open(file, "rb").read()
-        m = FakeMsg(self.next_id, data, caption)
+    def add(self, data, caption="", **kw):
+        m = FakeMsg(self.next_id, data, caption, **kw)
         self.msgs[m.id] = m
         self.next_id += 1
         return m
+
+    async def send_file(self, chat, file, caption="", **kw):
+        if chat != "channel":
+            self.sent_to.append((chat, file, caption))
+        data = file if isinstance(file, bytes) else open(file, "rb").read() if isinstance(file, str) else b"media"
+        return self.add(data, caption, name=os.path.basename(file) if isinstance(file, str) else None)
+
+    async def iter_messages(self, chat, search=None, limit=None, min_id=0, reverse=False):
+        for mid in sorted(self.msgs, reverse=not reverse):
+            m = self.msgs.get(mid)
+            if m is None or mid <= min_id or (search and search not in (m.message or "")):
+                continue
+            yield m
+
+    async def get_me(self):
+        return types.SimpleNamespace(premium=False, first_name="Me")
 
     async def get_messages(self, chat, ids=None):
         if isinstance(ids, list):
@@ -90,7 +124,7 @@ async def flush(d):
     task = asyncio.create_task(d.upload_worker(log=lambda m: None))
     for _ in range(1000):
         await asyncio.sleep(0.005)
-        if not d.pending() and d.current_pending_id() is None:
+        if not d.pending() and not d.active_ids():
             break
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):

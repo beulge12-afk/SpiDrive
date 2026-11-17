@@ -34,9 +34,30 @@ with us, and your encryption key never leaves your device.
   subtitles from a matching `.srt` file.
 - **Works where Telegram is blocked.** Connects through your VPN app or a proxy link, or finds a working
   MTProto proxy automatically, and switches when one stops working.
-- **Share files** with any Telegram contact in one click.
 - **Safe by design.** Uploads resume after a disconnect, every part is checked with SHA-256, and the file
   index is backed up to your channel every day.
+
+**Telegram-powered**
+
+- **Phone control through Saved Messages.** Send `/find`, `/get`, `/stats` or `/keep` to yourself, and your
+  PC replies with the file or answer. It works from anywhere, with no open ports.
+- **Auto-organized Telegram Inbox.** Files you send from your phone are filed into folders like
+  `Photos/2026-11`, `Voice` and `Docs`.
+- **Share** a file with any Telegram contact, or create a **time-limited link** that opens on your Wi-Fi.
+
+**Sync and backup**
+
+- **Backup-only folders.** Documents and Pictures upload to the drive but never download back, and
+  deleting on the PC never deletes the drive copy.
+- **Upload controls.** Pause, a speed limit, and several small files uploading at once.
+- **Duplicate finder.** Spots identical files, and uploads instantly when the content is already there.
+
+**Security**
+
+- **Encrypted index backup.** With a passphrase set, the daily backup is encrypted; only recent copies are kept.
+- **Recovery key.** Change the passphrase without re-encrypting anything, and print a recovery key.
+- **Drive health.** A background check re-verifies random files against their stored SHA-256, and the
+  dashboard shows a health card.
 
 ## Installation
 
@@ -107,10 +128,13 @@ messages belong to which file. Encryption uses AES-256-CTR with a key derived fr
 | `search.py` | Smart search: Persian spelling variants and filters |
 | `thumbs.py`, `zipper.py` | Photo previews, streamed ZIP downloads |
 | `webguard.py` | Stops other websites from using SpiDrive's local servers |
+| `keys.py` | Master key, passphrase and recovery key, encrypted index backups |
+| `phone.py` | `/find`, `/get`, `/stats`, `/keep` in Saved Messages |
+| `links.py` | Share links on the Wi-Fi (their own small server: nothing else is reachable) |
 | `tests/` | Tests (`pip install pytest pytest-aiohttp`, then `pytest`) |
 | `server.py` | Web dashboard and its API |
 | `dav.py`, `mount.py` | The drive letter (WebDAV server + rclone/WinFsp) |
-| `sync.py` | Two-way folder sync |
+| `sync.py` | Two-way sync and backup-only folders |
 | `proxy.py` | Direct, manual-proxy or automatic-proxy connection to Telegram |
 | `settings.py`, `setup_server.py` | Settings and the first-run setup page |
 | `drive.py` | Command-line tool |
@@ -122,7 +146,9 @@ messages belong to which file. Encryption uses AES-256-CTR with a key derived fr
 
 - Your Telegram login (`*.session`), `config.py`, `app_id.py` and `settings.json` give access to your
   account and files. **Never share or upload them.** They are listed in `.gitignore`.
-- If you lose your encryption passphrase, encrypted files cannot be recovered.
+- If you lose your encryption passphrase and have no recovery key, encrypted files cannot be recovered.
+- Share links work for anyone on the same network who has the link, until it expires. Make them short-lived
+  on networks you don't trust.
 - A proxy cannot read your files (Telegram traffic is encrypted), but it can see when and how much data
   you send.
 - Telegram stores your data. Keep another copy of anything irreplaceable.

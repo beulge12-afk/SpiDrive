@@ -11,9 +11,11 @@ TelegramDrive command line.
   python drive.py empty-trash
   python drive.py backup
   python drive.py restore-index [-y]    (after a crash or on a new PC)
+  python drive.py change-passphrase     (files are not re-encrypted)
 """
 import argparse
 import asyncio
+import getpass
 import os
 import posixpath
 import socket
@@ -23,6 +25,7 @@ import time
 
 from drive_core import DATA_DIR, DB_PATH, Drive, norm
 import config
+import keys
 
 
 def human(n):
@@ -199,6 +202,33 @@ async def cmd_restore(d, a):
     print(f"Newest backup in the channel: {msg.message[len('#index_backup'):].strip()}  ({human(msg.file.size)})")
     tmp = os.path.join(DATA_DIR, "index_restore.db")
     await d.client.download_media(msg, file=tmp)
+    with open(tmp, "rb") as f:
+        blob = f.read()
+    master = new_pass = None
+    if keys.is_encrypted_backup(blob):
+        opened = None
+        if config.PASSPHRASE:
+            try:
+                opened = keys.decrypt_backup(blob, config.PASSPHRASE)
+            except keys.WrongKey:
+                pass
+        while opened is None:
+            secret = getpass.getpass("This backup is encrypted. Type your passphrase or your recovery key "
+                                     "(empty to stop): ")
+            if not secret:
+                os.remove(tmp)
+                print("cancelled.")
+                return 1
+            try:
+                opened = keys.decrypt_backup(blob, secret)
+            except keys.WrongKey as e:
+                print(e)
+        data, master, how = opened
+        with open(tmp, "wb") as f:
+            f.write(data)
+        if how == "recovery":
+            print("Opened with the recovery key. Choose a new passphrase for this drive.")
+            new_pass = ask_new_passphrase()
     try:
         test = sqlite3.connect(tmp)
         n = test.execute("SELECT COUNT(*) FROM files").fetchone()[0]
@@ -218,8 +248,37 @@ async def cmd_restore(d, a):
         if os.path.exists(DB_PATH + suffix):
             os.replace(DB_PATH + suffix, f"{DB_PATH}.before-restore-{stamp}{suffix}")
     os.replace(tmp, DB_PATH)
+    if new_pass:
+        db = sqlite3.connect(DB_PATH)
+        salt = os.urandom(16)
+        db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('wrap_pass_salt',?)", (salt,))
+        db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('wrap_pass',?)",
+                   (keys.wrap(keys.kdf(new_pass, salt), master),))
+        db.commit()
+        db.close()
+        print("New passphrase set. Put the same one in SpiDrive's Settings (or PASSPHRASE in config.py).")
     print(f"Restored. Your old index was kept as index.db.before-restore-{stamp}.")
     print("Start SpiDrive again.")
+
+
+def ask_new_passphrase():
+    while True:
+        new = getpass.getpass("New passphrase (at least 8 characters): ")
+        if len(new) < 8:
+            print("Too short.")
+        elif getpass.getpass("Type it again: ") != new:
+            print("They are different. Try again.")
+        else:
+            return new
+
+
+async def cmd_change_passphrase(d, a):
+    """Re-wrap the encryption key for a new passphrase. Files are not touched."""
+    cur = getpass.getpass("Current passphrase (or press Enter to use your recovery key): ")
+    rk = None if cur else getpass.getpass("Recovery key: ")
+    new = ask_new_passphrase()
+    d.change_passphrase(new, current=cur or None, recovery_key=rk)
+    print("Done. Now set PASSPHRASE in config.py to the new one and restart SpiDrive.")
 
 
 async def cmd_backup(d, a):
@@ -265,6 +324,8 @@ def build_parser():
     sub.add_parser("empty-trash", help="delete everything in the trash for good").set_defaults(func=cmd_empty_trash)
     sub.add_parser("info", help="show account and drive status").set_defaults(func=cmd_info)
     sub.add_parser("backup", help="back up the index to the channel").set_defaults(func=cmd_backup)
+    sub.add_parser("change-passphrase", help="change the encryption passphrase (no re-encryption)"
+                   ).set_defaults(func=cmd_change_passphrase)
     s = sub.add_parser("restore-index", help="restore the index from the newest backup in the channel")
     s.add_argument("-y", "--yes", action="store_true")
     s.set_defaults(func=cmd_restore)

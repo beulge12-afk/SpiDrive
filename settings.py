@@ -50,6 +50,14 @@ DEFAULTS = {
     "PROXY_MODE": "auto",          # auto | manual | off   (see proxy.py)
     "PROXY": "",                   # manual proxy link
     "PROXY_SOURCES": None,         # None = proxy.DEFAULT_SOURCES
+    "PHONE_COMMANDS": True,        # answer /find, /get, /stats, /keep in Saved Messages
+    "INBOX_ORGANIZE": True,        # file Telegram Inbox items into Photos/2026-11, Voice, Docs...
+    "HEALTH_CHECK": True,          # re-check random parts against their SHA-256 every hour
+    "SHARE_PORT": 8001,            # share links on the Wi-Fi
+    "UPLOAD_PARALLEL": 3,          # small files uploading at the same time
+    "BACKUP_KEEP": 7,              # index backups kept in the channel
+    "TRASH_DAYS": 30,
+    "KEEP_VERSIONS": 10,
 }
 
 

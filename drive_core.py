@@ -21,7 +21,10 @@ The web dashboard (server.py) and the Windows drive (dav.py) use this module.
 """
 import asyncio
 import hashlib
+import inspect
+import json
 import os
+import random
 import posixpath
 import re
 import secrets
@@ -35,6 +38,7 @@ from telethon.tl.types import (DocumentAttributeFilename, MessageMediaDocument,
                                MessageMediaPhoto)
 
 import config
+import keys
 import search
 import thumbs
 
@@ -54,12 +58,23 @@ OFFLINE = os.path.join(DATA_DIR, "offline")        # files kept on this PC (decr
 TRASH_DAYS = int(getattr(config, "TRASH_DAYS", 30))
 KEEP_VERSIONS = int(getattr(config, "KEEP_VERSIONS", 10))
 LIVE = "substr(path,1,1)='/'"                      # rows that are on the drive (not in the trash)
+UPLOAD_PARALLEL = int(getattr(config, "UPLOAD_PARALLEL", 3))   # uploads at the same time
+SMALL_FILE = 20 * 1024 * 1024                      # bigger files upload one at a time
+BACKUP_KEEP = int(getattr(config, "BACKUP_KEEP", 7))   # index backups kept in the channel
+HEALTH_BUDGET = 64 * 1024 * 1024                   # bytes re-downloaded per health check
 
 
 # ---------------------------------------------------------------- helpers
 
 class NotLoggedIn(RuntimeError):
     pass
+
+
+async def _call(fn, *args):
+    """Call a callback that may or may not be async."""
+    r = fn(*args)
+    if inspect.isawaitable(r):
+        await r
 
 
 def norm(path):
@@ -173,7 +188,8 @@ class Drive:
         # background upload state
         os.makedirs(INCOMING, exist_ok=True)
         self._wake = asyncio.Event()
-        self._current = None          # (pending id, asyncio task) being uploaded right now
+        self._active = {}             # pending id -> upload task running now
+        self._active_size = {}        # pending id -> size
         self._trash = set()           # staged files to delete once Windows releases them
         self._retry_at = {}           # pending id -> time of next attempt
         self.progress = {}            # pending id -> {"done", "total", "error"}
@@ -183,6 +199,11 @@ class Drive:
         self._pending_thumbs = {}     # staged file path -> preview bytes
         self._keep_wake = asyncio.Event()
         self.keeping = {}             # file id -> {"done", "total", "path"} while kept files download
+        self.paused = self._meta("uploads_paused") == "1"
+        self.limit = int(self._meta("upload_limit") or 0)   # bytes per second, 0 = no limit
+        self._next_free = 0.0         # shared schedule for the speed limit
+        self._handlers = []           # Telegram event handlers (phone commands)
+        self.health_running = False
 
     # ---------- lifecycle
 
@@ -190,7 +211,15 @@ class Drive:
         from proxy import client_kwargs
         c = TelegramClient(SESSION_PATH, config.API_ID, config.API_HASH, **client_kwargs(via))
         c.flood_sleep_threshold = 300                  # auto-wait on short flood limits
+        for callback, event in self._handlers:         # survive switching to another proxy
+            c.add_event_handler(callback, event)
         return c
+
+    def on_event(self, callback, event):
+        """Listen to Telegram updates (also after the connection is switched)."""
+        self._handlers.append((callback, event))
+        if self.client is not None:
+            self.client.add_event_handler(callback, event)
 
     async def connect(self, interactive=True):
         """interactive=True asks for the login code in the console if needed (drive.py,
@@ -304,6 +333,22 @@ class Drive:
         );
         CREATE INDEX IF NOT EXISTS trash_items_batch ON trash_items(batch);
         CREATE INDEX IF NOT EXISTS trash_batches_path ON trash_batches(path);
+        CREATE TABLE IF NOT EXISTS health(
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            idx     INTEGER NOT NULL,
+            checked REAL NOT NULL,
+            ok      INTEGER NOT NULL,
+            error   TEXT,
+            PRIMARY KEY(file_id, idx)
+        );
+        CREATE TABLE IF NOT EXISTS links(
+            token     TEXT PRIMARY KEY,
+            path      TEXT NOT NULL,
+            file_id   INTEGER,
+            created   REAL NOT NULL,
+            expires   REAL NOT NULL,
+            downloads INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS th.thumbs(
             key    TEXT PRIMARY KEY,                   -- sha256 of the first part, or msg:<id>
             data   BLOB,
@@ -327,22 +372,85 @@ class Drive:
         self.db.commit()
 
     def _get_key(self):
+        """The master key that encrypts files (see keys.py)."""
         if self._key is None:
-            if not config.PASSPHRASE:
-                raise RuntimeError("This needs encryption but PASSPHRASE is empty in config.py.")
-            salt = self._meta("salt")
-            if salt is None:
-                salt = secrets.token_bytes(16)
-                self._set_meta("salt", salt)
-            key = _derive_key(config.PASSPHRASE, salt)
-            check = hashlib.sha256(b"tgdrive-check" + key).digest()
-            stored = self._meta("key_check")
-            if stored is None:
-                self._set_meta("key_check", check)
-            elif stored != check:
-                raise RuntimeError("Wrong PASSPHRASE: it differs from the one used for earlier files.")
-            self._key = key
+            self._key = self._unlock(config.PASSPHRASE)
         return self._key
+
+    def _unlock(self, passphrase):
+        if not passphrase:
+            raise RuntimeError("This needs encryption but PASSPHRASE is empty in config.py.")
+        wrapped = self._meta("wrap_pass")
+        if wrapped is not None:
+            try:
+                return keys.unwrap(keys.kdf(passphrase, self._meta("wrap_pass_salt")), wrapped)
+            except keys.WrongKey:
+                raise RuntimeError("Wrong PASSPHRASE: it differs from the one used for earlier files.") from None
+        # first use, or an index from before keys.py: the key comes from the passphrase itself
+        salt = self._meta("salt")
+        if salt is None:
+            salt = secrets.token_bytes(16)
+            self._set_meta("salt", salt)
+        key = _derive_key(passphrase, salt)
+        check = hashlib.sha256(b"tgdrive-check" + key).digest()
+        stored = self._meta("key_check")
+        if stored is None:
+            self._set_meta("key_check", check)
+        elif stored != check:
+            raise RuntimeError("Wrong PASSPHRASE: it differs from the one used for earlier files.")
+        self._wrap_for_passphrase(key, passphrase)
+        return key
+
+    def _wrap_for_passphrase(self, master, passphrase):
+        salt = secrets.token_bytes(16)
+        self.db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('wrap_pass_salt',?)", (salt,))
+        self.db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('wrap_pass',?)",
+                        (keys.wrap(keys.kdf(passphrase, salt), master),))
+        self.db.commit()
+
+    def has_key(self):
+        return self._meta("wrap_pass") is not None or self._meta("key_check") is not None
+
+    def key_status(self):
+        created = self._meta("recovery_created")
+        return {"has_key": self.has_key(), "recovery": float(created) if created else None}
+
+    def change_passphrase(self, new, current=None, recovery_key=None):
+        """Re-wrap the master key for a new passphrase. Proves the right to do so with the
+        current passphrase or the recovery key. Files are not touched."""
+        if len(new or "") < 8:
+            raise ValueError("The new passphrase must have at least 8 characters.")
+        if recovery_key:
+            if self._meta("wrap_recovery") is None:
+                raise ValueError("No recovery key was created for this drive.")
+            rk = keys.normalize_recovery_key(recovery_key)
+            master = keys.unwrap(keys.kdf(rk, self._meta("wrap_recovery_salt")), self._meta("wrap_recovery"))
+        elif self.has_key():
+            try:
+                master = self._unlock(current or "")
+            except RuntimeError:
+                raise ValueError("The current passphrase is not right.") from None
+        else:                                        # nothing encrypted yet: no key to re-wrap
+            if config.PASSPHRASE and not secrets.compare_digest(
+                    (current or "").encode("utf-8"), str(config.PASSPHRASE).encode("utf-8")):
+                raise ValueError("The current passphrase is not right.")
+            master = None
+        if master is not None:
+            self._wrap_for_passphrase(master, new)
+            self._key = master
+        return master is not None
+
+    def create_recovery_key(self):
+        """A new recovery key (replaces an older one). Shown once: print it or write it down."""
+        master = self._get_key()
+        rk = keys.new_recovery_key()
+        salt = secrets.token_bytes(16)
+        for k, v in (("wrap_recovery_salt", salt),
+                     ("wrap_recovery", keys.wrap(keys.kdf(keys.normalize_recovery_key(rk), salt), master)),
+                     ("recovery_created", str(time.time()))):
+            self.db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (k, v))
+        self.db.commit()
+        return rk
 
     def _chunks(self, file_id):
         return self.db.execute(
@@ -626,12 +734,38 @@ class Drive:
     def pending(self):
         return self.db.execute("SELECT * FROM pending ORDER BY id").fetchall()
 
-    def current_pending_id(self):
-        return self._current[0] if self._current else None
+    def active_ids(self):
+        """Pending uploads running right now."""
+        return set(self._active)
 
     def _cancel_if_current(self, pending_id):
-        if self._current and self._current[0] == pending_id:
-            self._current[1].cancel()
+        t = self._active.get(pending_id)
+        if t is not None:
+            t.cancel()
+
+    def set_upload_controls(self, paused=None, limit=None):
+        """Pause or resume uploads, and set a speed limit in bytes per second (0 = none).
+        Pausing stops running uploads; they continue from their last finished part."""
+        if paused is not None:
+            self.paused = bool(paused)
+            self._set_meta("uploads_paused", "1" if self.paused else "0")
+            if self.paused:
+                for t in list(self._active.values()):
+                    t.cancel()
+        if limit is not None:
+            self.limit = max(0, int(limit))
+            self._set_meta("upload_limit", str(self.limit))
+        self._wake.set()
+
+    async def _throttle(self, nbytes):
+        """Keep all uploads together under the speed limit."""
+        if not self.limit or nbytes <= 0:
+            return
+        now = time.monotonic()
+        self._next_free = max(self._next_free, now) + nbytes / self.limit
+        delay = self._next_free - now - 0.25
+        if delay > 0:
+            await asyncio.sleep(delay)
 
     def _discard(self, tmp):
         try:
@@ -669,87 +803,106 @@ class Drive:
         del self.recent[:-200]
 
     async def upload_worker(self, log=print):
-        """Runs forever: uploads pending files to Telegram one at a time,
-        retrying with a growing delay when the network fails."""
-        while True:
-            self._empty_trash()
-            now = time.time()
-            job = None
-            for p in self.pending():
-                if self._retry_at.get(p["id"], 0) <= now:
-                    job = p
-                    break
-            if job is None:
+        """Runs forever: uploads pending files to Telegram, several small files at once
+        (big ones one at a time), retrying with a growing delay when the network fails."""
+        jobs = set()
+        try:
+            while True:
+                self._empty_trash()
+                now = time.time()
+                if not self.paused:
+                    big_running = any(sz > SMALL_FILE for sz in self._active_size.values())
+                    for p in self.pending():
+                        if len(self._active_size) >= UPLOAD_PARALLEL:
+                            break
+                        if p["id"] in self._active_size or self._retry_at.get(p["id"], 0) > now:
+                            continue
+                        big = p["size"] > SMALL_FILE
+                        if big and big_running:
+                            continue
+                        big_running |= big
+                        self._active_size[p["id"]] = p["size"]
+                        t = asyncio.create_task(self._run_job(p, log))
+                        jobs.add(t)
+                        t.add_done_callback(lambda t, pid=p["id"]: (
+                            jobs.discard(t), self._active_size.pop(pid, None), self._wake.set()))
                 waits = [t - now for t in self._retry_at.values() if t > now]
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=min(waits + [30]))
                 except asyncio.TimeoutError:
                     pass
-                continue
+        finally:
+            for t in list(jobs):
+                t.cancel()
+            await asyncio.gather(*jobs, return_exceptions=True)
 
-            pid, target = job["id"], job["path"]
-            if not os.path.exists(job["tmp"]):
-                self.db.execute("DELETE FROM pending WHERE id=?", (pid,))
-                self.db.commit()
-                continue
-            prog = self.progress.setdefault(pid, {"done": 0, "total": job["size"], "error": None})
-            prog["error"] = None
-
-            def cb(done, total, prog=prog):
-                prog["done"], prog["total"] = done, total
-
-            task = asyncio.create_task(self.upload(job["tmp"], target, overwrite=True, progress=cb))
-            self._current = (pid, task)
-            try:
-                await asyncio.wait({task})
-            except asyncio.CancelledError:
-                task.cancel()
-                raise
-            finally:
-                self._current = None
-
-            now_p = self.db.execute("SELECT * FROM pending WHERE id=?", (pid,)).fetchone()
-            if task.cancelled() or now_p is None:
-                # deleted or replaced while uploading
-                self.progress.pop(pid, None)
-                self._retry_at.pop(pid, None)
-                if not task.cancelled() and task.exception() is None and now_p is None \
-                        and self._pending_row(target) is None:
-                    row = self.get_file_by_id(task.result()["id"])
-                    if row is not None:
-                        await self._delete_rows([row])
-                continue
-            exc = task.exception()
-            if exc is not None:
-                tries = prog.get("tries", 0) + 1
-                prog["tries"] = tries
-                wait = min(300, 15 * 2 ** (tries - 1))
-                prog["error"] = f"{exc or type(exc).__name__}"
-                self._retry_at[pid] = time.time() + wait
-                log(f"upload failed ({target}): {exc!r}. Retrying in {wait}s")
-                continue
-
-            row = self.get_file_by_id(task.result()["id"])
-            if row is not None and row["path"] != now_p["path"]:     # renamed while uploading
-                other = self.get_file(now_p["path"])
-                if other is not None and other["id"] != row["id"]:
-                    if other["status"] == "complete":
-                        await self._retire_version(other)
-                    else:
-                        await self._delete_rows([other])
-                self.db.execute("UPDATE files SET path=? WHERE id=?", (now_p["path"], row["id"]))
-            if row is not None and row["mtime"] != now_p["mtime"]:
-                self.db.execute("UPDATE files SET mtime=? WHERE id=?", (now_p["mtime"], row["id"]))
-            kept = await self._after_upload(row, now_p)
+    async def _run_job(self, job, log):
+        pid, target = job["id"], job["path"]
+        if not os.path.exists(job["tmp"]):
             self.db.execute("DELETE FROM pending WHERE id=?", (pid,))
             self.db.commit()
-            if not kept:
-                self._discard(now_p["tmp"])
+            return
+        prog = self.progress.setdefault(pid, {"done": 0, "total": job["size"], "error": None})
+        prog["error"] = None
+
+        def cb(done, total, prog=prog):
+            prog["done"], prog["total"] = done, total
+
+        task = asyncio.create_task(self.upload(job["tmp"], target, overwrite=True, progress=cb))
+        self._active[pid] = task
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        finally:
+            self._active.pop(pid, None)
+
+        now_p = self.db.execute("SELECT * FROM pending WHERE id=?", (pid,)).fetchone()
+        if task.cancelled() and now_p is not None:
+            return                                       # paused: continues later
+        if task.cancelled() or now_p is None:
+            # deleted or replaced while uploading
             self.progress.pop(pid, None)
             self._retry_at.pop(pid, None)
-            self._finished(now_p["path"], "done", now_p["size"])
-            log(f"uploaded {now_p['path']}")
+            if not task.cancelled() and task.exception() is None and now_p is None \
+                    and self._pending_row(target) is None and not task.result().get("deduped"):
+                row = self.get_file_by_id(task.result()["id"])
+                if row is not None:
+                    await self._delete_rows([row])
+            return
+        exc = task.exception()
+        if exc is not None:
+            tries = prog.get("tries", 0) + 1
+            prog["tries"] = tries
+            wait = min(300, 15 * 2 ** (tries - 1))
+            prog["error"] = f"{exc or type(exc).__name__}"
+            self._retry_at[pid] = time.time() + wait
+            log(f"upload failed ({target}): {exc!r}. Retrying in {wait}s")
+            return
+
+        result = task.result()
+        row = self.get_file_by_id(result["id"])
+        if row is not None and row["path"] != now_p["path"]:     # renamed while uploading
+            other = self.get_file(now_p["path"])
+            if other is not None and other["id"] != row["id"]:
+                if other["status"] == "complete":
+                    await self._retire_version(other)
+                else:
+                    await self._delete_rows([other])
+            self.db.execute("UPDATE files SET path=? WHERE id=?", (now_p["path"], row["id"]))
+        if row is not None and row["mtime"] != now_p["mtime"]:
+            self.db.execute("UPDATE files SET mtime=? WHERE id=?", (now_p["mtime"], row["id"]))
+        kept = await self._after_upload(row, now_p)
+        self.db.execute("DELETE FROM pending WHERE id=?", (pid,))
+        self.db.commit()
+        if not kept:
+            self._discard(now_p["tmp"])
+        self.progress.pop(pid, None)
+        self._retry_at.pop(pid, None)
+        self._finished(now_p["path"], "done", now_p["size"])
+        log(f"{'already on the drive, added instantly' if result.get('deduped') else 'uploaded'}: {now_p['path']}")
 
     async def _after_upload(self, row, p):
         """Make the photo preview from the local copy (so it never has to be downloaded),
@@ -792,6 +945,13 @@ class Drive:
             if row["status"] == "complete":
                 if not overwrite:
                     raise FileExistsError(remote)
+                if row["encrypted"] == int(enc) and await self._same_content(local_path, size, row):
+                    # nothing changed but the date (sync, or saved without changes)
+                    self.db.execute("UPDATE files SET mtime=? WHERE id=?", (mtime, row["id"]))
+                    self.db.commit()
+                    if progress:
+                        await _call(progress, size, size)
+                    return {**dict(self.get_file_by_id(row["id"])), "deduped": True}
                 keep = row["keep"]
                 await self._retire_version(row)        # the old file stays restorable
                 row = None
@@ -799,6 +959,21 @@ class Drive:
                 await self._delete_rows([row])         # stale partial upload of a different file
                 row = None
         if row is None:
+            dup = await self._find_duplicate(local_path, size, enc)
+            if dup is not None:                        # same content already in the channel
+                cur = self.db.execute(
+                    "INSERT INTO files(path,size,mtime,created,encrypted,nonce,chunk_size,status,origin,keep) "
+                    "VALUES(?,?,?,?,?,?,?,'complete','local',?)",
+                    (remote, size, mtime, time.time(), dup["encrypted"], dup["nonce"], dup["chunk_size"], keep))
+                self.db.execute(
+                    "INSERT INTO chunks(file_id,idx,msg_id,start,size,sha256) "
+                    "SELECT ?,idx,msg_id,start,size,sha256 FROM chunks WHERE file_id=?", (cur.lastrowid, dup["id"]))
+                self.db.commit()
+                if posixpath.dirname(remote) != "/":
+                    self.mkdir(posixpath.dirname(remote))
+                if progress:
+                    await _call(progress, size, size)
+                return {**dict(self.get_file_by_id(cur.lastrowid)), "deduped": True}
             self.db.execute(
                 "INSERT INTO files(path,size,mtime,created,encrypted,nonce,chunk_size,status,keep) "
                 "VALUES(?,?,?,?,?,?,?,'uploading',?)",
@@ -828,7 +1003,76 @@ class Drive:
         self.db.commit()
         if posixpath.dirname(remote) != "/":
             self.mkdir(posixpath.dirname(remote))
-        return self.get_file_by_id(row["id"])
+        return {**dict(self.get_file_by_id(row["id"])), "deduped": False}
+
+    # ---------- duplicates
+
+    @staticmethod
+    def _hash_range(path, start, length):
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            f.seek(start)
+            left = length
+            while left > 0:
+                b = f.read(min(1024 * 1024, left))
+                if not b:
+                    break
+                h.update(b)
+                left -= len(b)
+        return h.hexdigest()
+
+    async def _same_content(self, local_path, size, row, cache=None):
+        """True if the local file has exactly the content of a stored file (checked part
+        by part with the SHA-256 the index already has; stops at the first difference)."""
+        if row["size"] != size or size == 0:
+            return False
+        chunks = self._chunks(row["id"])
+        if not chunks or any(not c["sha256"] for c in chunks) or sum(c["size"] for c in chunks) != size:
+            return False
+        cache = {} if cache is None else cache
+        for c in chunks:
+            k = (c["start"], c["size"])
+            if k not in cache:
+                cache[k] = await asyncio.to_thread(self._hash_range, local_path, c["start"], c["size"])
+            if cache[k] != c["sha256"]:
+                return False
+        return True
+
+    async def _find_duplicate(self, local_path, size, enc):
+        """A stored file (on the drive or in the trash) with the same content and the same
+        encryption setting, or None. Only files of exactly the same size are read."""
+        if size == 0:
+            return None
+        cache = {}
+        for r in self.db.execute(
+                "SELECT * FROM files WHERE size=? AND status='complete' AND encrypted=? "
+                "ORDER BY substr(path,1,1)='/' DESC, id DESC LIMIT 8", (size, int(enc))).fetchall():
+            if await self._same_content(local_path, size, r, cache):
+                return r
+        return None
+
+    def duplicates(self):
+        """Groups of files on the drive with identical content. 'stored' says how many
+        separate copies are in the channel (copies SpiDrive made itself share one)."""
+        groups = {}
+        for r in self.db.execute(
+                "SELECT f.*, (SELECT group_concat(sha256, ',') FROM "
+                "(SELECT sha256 FROM chunks WHERE file_id=f.id ORDER BY idx)) AS sig, "
+                "(SELECT group_concat(msg_id, ',') FROM "
+                "(SELECT msg_id FROM chunks WHERE file_id=f.id ORDER BY idx)) AS msgs "
+                f"FROM files f WHERE f.status='complete' AND f.size>0 AND {LIVE.replace('path', 'f.path')}"):
+            if not r["sig"] or ",," in "," + r["sig"] + "," or r["sig"].startswith(","):
+                continue
+            groups.setdefault((r["size"], r["sig"]), []).append(r)
+        out = []
+        for (size, _), rows in groups.items():
+            if len(rows) < 2:
+                continue
+            stored = len({r["msgs"] for r in rows})
+            out.append({"size": size, "stored": stored, "extra_bytes": (stored - 1) * size,
+                        "files": [dict(r) for r in sorted(rows, key=lambda r: (r["created"], r["id"]))]})
+        out.sort(key=lambda g: (-g["extra_bytes"], -g["size"] * len(g["files"])))
+        return out
 
     async def _upload_chunk(self, local_path, row, idx, n, start, length, key, progress):
         remote, total = row["path"], row["size"]
@@ -842,11 +1086,16 @@ class Drive:
             caption = f"{remote[-900:]}\n[{idx + 1}/{n}]"
             factory = None
 
-        def cb(sent, _):
+        last = [0]
+
+        async def cb(sent, _):
             if progress:
-                progress(start + sent, total)
+                await _call(progress, start + sent, total)
+            await self._throttle(sent - last[0])
+            last[0] = sent
 
         for attempt in range(1, UPLOAD_RETRIES + 1):
+            last[0] = 0
             reader = ChunkReader(local_path, start, length, factory)
             try:
                 handle = await self.client.upload_file(
@@ -911,15 +1160,15 @@ class Drive:
         async for data in self.iter_row(row, offset, length):
             yield data
 
-    async def iter_row(self, row, offset=0, length=None):
+    async def iter_row(self, row, offset=0, length=None, local=True):
         """Like iter_bytes, for a files row (also one in the trash). Reads the copy
-        kept on this PC when there is one."""
+        kept on this PC when there is one (unless local=False)."""
         remote = row["path"]
         size = row["size"]
         end = size if length is None else min(size, offset + length)
         if offset >= end:
             return
-        local = self._local_copy(row)
+        local = self._local_copy(row) if local else None
         if local:
             async for data in self._iter_file(local, offset, end):
                 yield data
@@ -1240,6 +1489,8 @@ class Drive:
         old = self.db.execute("SELECT id, path, reason FROM trash_batches WHERE deleted<?", (cutoff,)).fetchall()
         await self.purge_batches([b["id"] for b in old])
         self._drop_empty_batches()
+        self.db.execute("DELETE FROM links WHERE expires<?", (time.time() - 86400,))
+        self.db.commit()
         return [f"{'old version of ' if b['reason'] == 'version' else ''}{b['path']}" for b in old]
 
     # ---------- keep on this PC
@@ -1404,6 +1655,22 @@ class Drive:
     # ---------- Telegram -> drive
 
     INBOX = "/Telegram Inbox"
+
+    def _inbox_folder(self, msg, name):
+        """Where a file sent from Telegram goes: Photos/2026-11, Videos/2026-11, Voice,
+        Music, Docs or Other inside the Telegram Inbox (or the Inbox itself when
+        INBOX_ORGANIZE is off)."""
+        if not getattr(config, "INBOX_ORGANIZE", True):
+            return self.INBOX
+        month = time.strftime("%Y-%m", time.localtime(msg.date.timestamp()))
+        if getattr(msg, "voice", None) is not None:
+            return f"{self.INBOX}/Voice"
+        kind = "image" if isinstance(msg.media, MessageMediaPhoto) else search.kind_of(name)
+        if kind == "image":
+            return f"{self.INBOX}/Photos/{month}"
+        if kind == "video":
+            return f"{self.INBOX}/Videos/{month}"
+        return f"{self.INBOX}/" + {"audio": "Music", "document": "Docs", "archive": "Docs"}.get(kind, "Other")
     _OWN_CAPTION = re.compile(r"\n\[\d+/\d+\]$")
     _OWN_ENC_NAME = re.compile(r"^\d+_\d+\.bin$")
 
@@ -1427,11 +1694,13 @@ class Drive:
             if name and self._OWN_ENC_NAME.match(name) and not caption:
                 continue                                # leftover piece of an interrupted encrypted upload
             if not name:
-                kind = "photo" if isinstance(msg.media, MessageMediaPhoto) else "file"
+                kind = "photo" if isinstance(msg.media, MessageMediaPhoto) else (
+                    "voice" if getattr(msg, "voice", None) is not None else "file")
                 name = f"{kind}_{msg.date:%Y%m%d_%H%M%S}_{msg.id}{msg.file.ext or ''}"
             name = name.replace("/", "_").replace("\\", "_")
             size = int(msg.file.size or 0)
-            path = self.free_path(f"{self.INBOX}/{name}")
+            folder = self._inbox_folder(msg, name)
+            path = self.free_path(f"{folder}/{name}")
             cur = self.db.execute(
                 "INSERT INTO files(path,size,mtime,created,encrypted,nonce,chunk_size,status,origin) "
                 "VALUES(?,?,?,?,0,NULL,?,'complete','telegram')",
@@ -1441,6 +1710,8 @@ class Drive:
                     "INSERT INTO chunks(file_id,idx,msg_id,start,size,sha256) VALUES(?,0,?,0,?,'')",
                     (cur.lastrowid, msg.id, size))
             self.db.commit()
+            if folder != self.INBOX:
+                self.mkdir(folder)
             imported.append(path)
         if newest != last:
             self._set_meta("last_scanned", str(newest))
@@ -1473,18 +1744,155 @@ class Drive:
     # ---------- index backup
 
     async def backup_index(self):
-        """Send a copy of index.db to the channel. Without the index, the
-        channel is just a pile of chunks, so do this regularly."""
+        """Send a copy of index.db to the channel. Without the index, the channel is just
+        a pile of chunks, so this runs every day. With a passphrase set, the copy is
+        encrypted (see keys.py). Only the newest BACKUP_KEEP copies are kept."""
         self.db.commit()
         tmp = os.path.join(DATA_DIR, "index_backup.db")
         bk = sqlite3.connect(tmp)
         self.db.backup(bk)
         bk.close()
+        encrypted = bool(config.PASSPHRASE)
         try:
+            if encrypted:
+                master = self._get_key()
+                wraps = {"pass": (self._meta("wrap_pass_salt"), self._meta("wrap_pass"))}
+                if self._meta("wrap_recovery") is not None:
+                    wraps["recovery"] = (self._meta("wrap_recovery_salt"), self._meta("wrap_recovery"))
+                with open(tmp, "rb") as f:
+                    blob = keys.encrypt_backup(f.read(), master, wraps)
+                os.remove(tmp)
+                tmp = os.path.join(DATA_DIR, "index_backup.spidrive")
+                with open(tmp, "wb") as f:
+                    f.write(blob)
             msg = await self.client.send_file(
                 self.channel, tmp, force_document=True,
-                caption=f"#index_backup {time.strftime('%Y-%m-%d %H:%M')}")
+                caption=f"#index_backup {time.strftime('%Y-%m-%d %H:%M')}" + (" encrypted" if encrypted else ""))
         finally:
             os.remove(tmp)
         self._set_meta("last_backup", str(time.time()))
+        self._set_meta("last_backup_encrypted", "1" if encrypted else "0")
+        await self._prune_backups()
         return msg.id
+
+    async def _prune_backups(self):
+        """Delete all but the newest BACKUP_KEEP index backups from the channel."""
+        found = []
+        async for m in self.client.iter_messages(self.channel, search="#index_backup", limit=200):
+            if getattr(m, "file", None) is not None and (m.message or "").startswith("#index_backup"):
+                found.append(m.id)
+        old = sorted(found, reverse=True)[BACKUP_KEEP:]
+        if old:
+            await self.client.delete_messages(self.channel, old)
+        return len(old)
+
+    # ---------- drive health
+
+    async def health_check(self, budget=HEALTH_BUDGET, log=print):
+        """Download a few random parts again (ones not checked recently first) and compare
+        them with the SHA-256 stored when they were uploaded. Returns the problems found."""
+        if self.health_running:
+            return []
+        self.health_running = True
+        problems, used = [], 0
+        try:
+            cands = self.db.execute(
+                "SELECT c.file_id, c.idx, c.start, c.size, c.sha256 FROM chunks c "
+                "JOIN files f ON f.id=c.file_id "
+                "LEFT JOIN health h ON h.file_id=c.file_id AND h.idx=c.idx "
+                "WHERE f.status='complete' AND c.sha256!='' "
+                "ORDER BY h.checked IS NOT NULL, h.checked < ? DESC, random() LIMIT 40",
+                (time.time() - 30 * 86400,)).fetchall()
+            for c in cands:
+                if used and used + c["size"] > budget:
+                    continue
+                row = self.get_file_by_id(c["file_id"])
+                if row is None:
+                    continue
+                h, error = hashlib.sha256(), None
+                try:
+                    async for data in self.iter_row(row, c["start"], c["size"], local=False):
+                        h.update(data)
+                    if h.hexdigest() != c["sha256"]:
+                        error = "The copy in Telegram does not match what was uploaded (checksum mismatch)."
+                except FileNotFoundError:
+                    error = "This part is missing from the channel (its message was deleted)."
+                except IOError as e:
+                    error = f"Could not be read completely: {e}"
+                used += c["size"]
+                self.db.execute(
+                    "INSERT OR REPLACE INTO health(file_id,idx,checked,ok,error) VALUES(?,?,?,?,?)",
+                    (c["file_id"], c["idx"], time.time(), int(error is None), error))
+                self.db.commit()
+                if error:
+                    problems.append(f"{row['path']}: {error}")
+                    log(f"health: {row['path']} part {c['idx'] + 1}: {error}")
+            self._set_meta("health_last", str(time.time()))
+            return problems
+        finally:
+            self.health_running = False
+
+    def health(self):
+        """The 'drive health' card: how much was verified lately, and any problems."""
+        since = time.time() - 30 * 86400
+        total = self.db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(c.size),0) FROM chunks c JOIN files f ON f.id=c.file_id "
+            f"WHERE f.status='complete' AND c.sha256!='' AND {LIVE.replace('path', 'f.path')}").fetchone()
+        ok = self.db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(c.size),0) FROM chunks c JOIN files f ON f.id=c.file_id "
+            "JOIN health h ON h.file_id=c.file_id AND h.idx=c.idx "
+            f"WHERE h.ok=1 AND h.checked>=? AND {LIVE.replace('path', 'f.path')}", (since,)).fetchone()
+        problems = [{"path": r["path"], "part": r["idx"] + 1, "error": r["error"], "checked": r["checked"],
+                     "file_id": r["file_id"]}
+                    for r in self.db.execute(
+                        "SELECT f.path, h.* FROM health h JOIN files f ON f.id=h.file_id "
+                        f"WHERE h.ok=0 AND {LIVE.replace('path', 'f.path')} ORDER BY h.checked DESC")]
+        last = self._meta("health_last")
+        return {"parts": total[0], "bytes": total[1], "verified_parts": ok[0], "verified_bytes": ok[1],
+                "percent": round(100 * ok[1] / total[1], 1) if total[1] else 100.0,
+                "last_check": float(last) if last else None, "problems": problems,
+                "running": self.health_running,
+                "status": "problem" if problems else ("good" if last else "not checked yet")}
+
+    # ---------- share links (served on the Wi-Fi by server.py)
+
+    def create_link(self, path, hours):
+        e = self.get_entry(path)
+        if e is None or e["status"] not in ("complete", "pending"):
+            raise FileNotFoundError(path)
+        token = secrets.token_urlsafe(9)
+        expires = time.time() + max(0.25, min(float(hours), 24 * 30)) * 3600
+        self.db.execute("INSERT INTO links(token,path,file_id,created,expires) VALUES(?,?,?,?,?)",
+                        (token, norm(path), e["id"] if e["id"] > 0 else None, time.time(), expires))
+        self.db.commit()
+        return token, expires
+
+    def links(self, path=None):
+        now = time.time()
+        if path is None:
+            rows = self.db.execute("SELECT * FROM links WHERE expires>? ORDER BY created DESC", (now,))
+        else:
+            rows = self.db.execute("SELECT * FROM links WHERE expires>? AND path=? ORDER BY created DESC",
+                                   (now, norm(path)))
+        return [dict(r) for r in rows]
+
+    def revoke_link(self, token):
+        self.db.execute("DELETE FROM links WHERE token=?", (token,))
+        self.db.commit()
+
+    def resolve_link(self, token):
+        """The file a link points to, or None if the link is unknown or expired. Follows
+        the file when it is renamed or moved."""
+        r = self.db.execute("SELECT * FROM links WHERE token=?", (token,)).fetchone()
+        if r is None or r["expires"] <= time.time():
+            return None, r
+        e = self.get_entry(r["path"])
+        if e is None and r["file_id"]:
+            row = self.get_file_by_id(r["file_id"])
+            if row is not None and row["path"].startswith("/"):
+                e = dict(row)
+        return e, r
+
+    def link_used(self, token):
+        self.db.execute("UPDATE links SET downloads=downloads+1 WHERE token=?", (token,))
+        self.db.commit()

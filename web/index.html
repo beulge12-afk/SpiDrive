@@ -168,7 +168,8 @@ a.btn{text-decoration:none;color:inherit}
 #settings .chk{display:flex;gap:9px;align-items:center;margin-top:12px;cursor:pointer}
 #settings .help{font-size:12.5px;color:var(--muted);margin-top:5px}
 #settings .warnbox{font-size:12.5px;background:color-mix(in srgb,var(--warn) 14%,transparent);border-radius:8px;padding:8px 10px;margin-top:8px}
-#settings .pair{display:grid;grid-template-columns:1fr 150px 34px;gap:8px;margin-top:8px}
+#settings .pair{display:grid;grid-template-columns:1fr 130px 112px 34px;gap:8px;margin-top:8px}
+@media (max-width:560px){#settings .pair{grid-template-columns:1fr 1fr 34px}#settings .pair select{grid-column:1/3}}
 #settings .foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--line)}
 #settings .ro{font-size:13px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;margin-top:6px}
 #settings .ro b{color:var(--text);font-weight:500;text-align:right;word-break:break-all}
@@ -236,6 +237,28 @@ img[data-thumb].in{opacity:1}
 .qerr{color:var(--warn);font-size:13px;margin-left:8px}
 #vResume{display:none}
 #vResume.on{display:inline-flex}
+/* health card, duplicates, share dialog, settings extras */
+.card2{background:var(--panel-2);border-radius:var(--radius);padding:12px;font-size:13px;display:grid;gap:6px}
+.card2 .hd{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.card2 .meter{height:6px;border-radius:99px;background:var(--line);overflow:hidden}
+.card2 .meter i{display:block;height:100%;background:var(--ok)}
+.card2 .row{display:flex;gap:6px;flex-wrap:wrap}
+.pill.bad{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+tr.grp td{background:transparent!important;border-bottom:0;padding-top:20px;font-weight:600;font-size:13px}
+tr.grp td small{color:var(--muted);font-weight:400;margin-left:6px}
+#dlg h4{margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+#dlg input[type=text],#dlg input[type=password],#dlg select{height:36px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);padding:0 10px;outline:none;min-width:0}
+#dlg input:focus{border-color:var(--accent);background:var(--panel)}
+.line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.line input[type=text],.line input[type=password]{flex:1}
+.lnk{border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-top:8px;font-size:13px}
+.lnk input{width:100%;font:12.5px ui-monospace,Consolas,monospace}
+.lnk small{color:var(--muted)}
+.rk{font:600 19px/1.7 ui-monospace,Consolas,monospace;letter-spacing:.06em;text-align:center;background:var(--panel-2);border-radius:10px;padding:14px;margin:10px 0;word-break:break-all;user-select:all}
+#panel .pctl{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px 8px 14px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+#panel.min .pctl{display:none}
+#panel .pctl select{height:30px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;margin-left:6px}
+#settings .pair select{height:38px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);padding:0 6px}
 video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:rgba(0,0,0,.62)}
 
 @media (max-width:820px){
@@ -259,6 +282,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
     <nav class="views" id="views">
       <a data-view="drive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>My Drive</a>
       <a data-view="photos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>Photos</a>
+      <a data-view="dups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>Duplicates</a>
       <a data-view="trash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Trash<em id="trashCount"></em></a>
     </nav>
     <div>
@@ -268,9 +292,13 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
       <ul class="legend" id="sLegend"></ul>
     </div>
     <div class="meta" id="sMeta"></div>
+    <div class="card2" id="hCard"></div>
     <div class="hint">
       <b>Send from Telegram:</b> forward or send any file to the <b id="chan2">MyDrive</b> channel and it appears in <b>Telegram Inbox</b> within a few seconds.
       <div><button class="btn sm" id="syncNow">Check now</button></div>
+    </div>
+    <div class="hint" style="margin-top:0">
+      <b>From your phone:</b> in Telegram, send <b>/help</b> to yourself in <b>Saved Messages</b>. Then <b>/find</b>, <b>/get</b>, <b>/stats</b> and <b>/keep</b> work from anywhere, while this PC is on.
     </div>
     <div class="hint" style="margin-top:0">
       <b>In File Explorer:</b> run <b>setup_drive.bat</b> once and SpiDrive appears under <b>This PC</b> as a drive you can drag files into.
@@ -324,6 +352,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
   <header><span id="pTitle">Uploads</span>
     <span><button class="btn sm ghost" id="pClear">Clear finished</button><button class="btn icon sm ghost" id="pMin" title="Minimise">–</button></span>
   </header>
+  <div class="pctl"><button class="btn sm" id="pPause" title="Pause or resume uploads to Telegram">Pause</button><label>Speed <select id="pLimit" title="Upload speed limit"><option value="0">no limit</option><option value="131072">128 KB/s</option><option value="524288">512 KB/s</option><option value="1048576">1 MB/s</option><option value="2097152">2 MB/s</option><option value="5242880">5 MB/s</option></select></label></div>
   <div class="list" id="pList"></div>
 </div>
 
@@ -351,10 +380,14 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
       <label class="chk"><input type="checkbox" id="sEnc"> Encrypt new uploads with AES-256</label>
       <div id="sPassBox"><label class="f" for="sPass">Encryption passphrase</label><input type="password" id="sPass" autocomplete="new-password" placeholder="at least 8 characters"></div>
       <div class="help" id="sPassInfo"></div>
-      <h3>Two-way sync</h3>
-      <div class="help">Folders on this PC kept in sync with folders on the drive.</div>
+      <div id="sKeyBox" style="margin-top:10px"><button class="btn sm" id="sChangePass">Change passphrase</button> <button class="btn sm" id="sRecovery">Create recovery key</button><div class="help" id="sKeyInfo"></div></div>
+      <h3>Sync and backup folders</h3>
+      <div class="help"><b>Two-way sync</b> keeps a PC folder and a drive folder the same. <b>Backup only</b> uploads changes from the PC but never downloads, and deleting on the PC never deletes the drive copy.</div>
       <div id="sPairs"></div>
-      <button class="btn sm" id="sAddPair" style="margin-top:8px">Add a folder</button>
+      <div class="line" style="margin-top:8px"><button class="btn sm" id="sAddPair">Add a folder</button><span id="sKnown" class="line"></span></div>
+      <h3>Telegram</h3>
+      <label class="chk"><input type="checkbox" id="sPhoneCmd"> Answer /find, /get, /stats and /keep in my Saved Messages</label>
+      <label class="chk"><input type="checkbox" id="sOrganize"> Sort files sent from Telegram into folders (Photos/2026-11, Videos, Voice, Docs…)</label>
       <h3>Connection to Telegram</h3>
       <label class="f" for="sPMode">How to connect</label>
       <select id="sPMode">
@@ -375,6 +408,7 @@ video::cue{font-family:Tahoma,"Segoe UI",sans-serif;font-size:1.05em;background:
       <div id="sPhoneBox"><label class="f" for="sWebPw">Password for phone access</label><input type="password" id="sWebPw" autocomplete="new-password"><div class="help" id="sPhoneInfo"></div></div>
       <h3>General</h3>
       <label class="chk"><input type="checkbox" id="sAuto"> Start SpiDrive when I sign in to Windows</label>
+      <label class="chk"><input type="checkbox" id="sHealth"> Check drive health every hour (downloads up to 64 MB to re-verify random files)</label>
       <label class="f" for="sChunk">Part size for big files (MB)</label><input type="text" id="sChunk" inputmode="numeric">
       <div class="help">Smaller parts lose less progress when the connection drops. 256 is a good choice.</div>
       <div class="ro"><span>Channel</span><b id="sChan"></b></div>
@@ -436,7 +470,7 @@ function toast(msg, action) {
 /* ---------- navigation ---------- */
 // #<encoded path> = a folder, #photos = Photos timeline, #trash = Trash
 function pathFromHash() { try { return decodeURIComponent(location.hash.slice(1)) || '/'; } catch { return '/'; } }
-function route() { const h = location.hash.slice(1); return h === 'photos' || h === 'trash' ? { mode: h, path: '/' } : { mode: 'drive', path: pathFromHash() }; }
+function route() { const h = location.hash.slice(1); return ['photos', 'trash', 'dups'].includes(h) ? { mode: h, path: '/' } : { mode: 'drive', path: pathFromHash() }; }
 function clearSearch() { state.q = ''; $('#q').value = ''; syncClear(); }
 function go(path) { if (state.q) clearSearch(); if (state.mode === 'drive' && pathFromHash() === path) load(); else location.hash = encodeURIComponent(path); }
 function goView(v) { if (state.q) clearSearch(); if (v === 'drive') return go(state.lastPath || '/'); if (location.hash.slice(1) === v) load(); else location.hash = v; }
@@ -457,6 +491,7 @@ async function load() {
       state.dirs = []; state.files = d.files || []; state.qErrors = d.errors || [];
     } else if (state.mode === 'photos') return loadPhotos(true);
     else if (state.mode === 'trash') return loadTrash();
+    else if (state.mode === 'dups') return loadDups();
     else {
       const d = await api('/api/list?path=' + encodeURIComponent(state.path));
       state.dirs = d.dirs || []; state.files = d.files || [];
@@ -491,6 +526,7 @@ const hasThumb = f => (f.kind === 'image' || f.kind === 'video') && ready(f);
 
 /* ---------- rendering ---------- */
 function sorted() {
+  if (state.mode === 'dups' && !state.q) return { dirs: [], files: state.files };    // keep the groups together
   const k = state.sort, m = state.asc ? 1 : -1;
   const files = [...state.files].sort((a, b) =>
     k === 'size' ? m*(a.size-b.size) : k === 'date' ? m*(a.created-b.created) : m*a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
@@ -519,7 +555,7 @@ function render() {
   const nd = dirs.length;
   const cb = (k, n) => `<input type="checkbox" class="cb" data-n="${n}" aria-label="Select">`;
   const acts = (i, isDir) => `<div class="acts"><button data-act="dl" data-${isDir?'d':'i'}="${i}" title="${isDir ? 'Download as ZIP' : 'Download'}">${svg('dl')}</button>${isDir ? '' : `<button data-act="share" data-i="${i}" title="Send to someone on Telegram">${svg('share')}</button><button data-act="ver" data-i="${i}" title="Earlier versions">${svg('history')}</button>`}<button data-act="mv" data-${isDir?'d':'i'}="${i}" title="Rename or move">${svg('edit')}</button><button class="del" data-act="rm" data-${isDir?'d':'i'}="${i}" title="Move to Trash">${svg('del')}</button></div>`;
-  const tags = f => (f.encrypted ? '<span class="tag" title="Encrypted">AES</span>' : '') + (f.status === 'pending' ? '<span class="tag" title="Saved on this PC, going to Telegram">uploading…</span>' : f.status !== 'complete' ? '<span class="tag warn">incomplete</span>' : '') + (f.keep ? (f.local ? '<span class="tag ok" title="Kept on this PC: opens without Telegram">On this PC</span>' : '<span class="tag" title="Downloading a copy to keep on this PC">keeping…</span>') : '') + (f.origin === 'telegram' ? '<span class="tag">from Telegram</span>' : '');
+  const tags = f => (f.encrypted ? '<span class="tag" title="Encrypted">AES</span>' : '') + (f.status === 'pending' ? (up.paused ? '<span class="tag warn" title="Saved on this PC; uploads are paused">waiting (paused)</span>' : '<span class="tag" title="Saved on this PC, going to Telegram">uploading…</span>') : f.status !== 'complete' ? '<span class="tag warn">incomplete</span>' : '') + (f.keep ? (f.local ? '<span class="tag ok" title="Kept on this PC: opens without Telegram">On this PC</span>' : '<span class="tag" title="Downloading a copy to keep on this PC">keeping…</span>') : '') + (f.origin === 'telegram' ? '<span class="tag">from Telegram</span>' : '');
   if (state.view === 'grid') {
     el.innerHTML = '<div class="grid">' +
       dirs.map((d, i) => `<div class="card" data-d="${i}" data-k="${esc('d:' + d.path)}">${cb('d', i)}<div class="thumb">${folderIco()}</div><div class="cap"><div dir="auto">${esc(d.name)}</div><small>Folder</small></div>${acts(i, true)}</div>`).join('') +
@@ -595,6 +631,7 @@ $('#crumbs').addEventListener('click', e => { const a = e.target.closest('[data-
 $('#content').addEventListener('click', async e => {
   if (state.mode === 'photos' && !state.q) return photoClick(e);
   if (state.mode === 'trash' && !state.q) return trashClick(e);
+  const ds = e.target.closest('[data-dupsel]'); if (ds) return dupSelect(ds.dataset.dupsel);
   if (e.target.id === 'selAll') { e.target.checked ? selectAll() : clearSel(); return; }
   const th = e.target.closest('th[data-sort]');
   if (th) { const k = th.dataset.sort; state.asc = state.sort === k ? !state.asc : true; state.sort = k; store.set('sort', k); store.set('asc', state.asc ? '1' : '0'); render(); return; }
@@ -614,14 +651,7 @@ $('#content').addEventListener('click', async e => {
     if (act === 'open') dir ? go(dir.path) : openFile(file);
     else if (act === 'dl') dir ? zipDownload([dir.path]) : download(file);
     else if (act === 'ver') openVersions(file);
-    else if (act === 'share') {
-      const to = prompt(`Send “${file.name}” to whom on Telegram?\n\nType their @username, a phone number saved in your contacts, or  me  for your Saved Messages.`, store.get('lastShare', ''));
-      if (!to || !to.trim()) return;
-      store.set('lastShare', to.trim());
-      await api('/api/share', { path: file.path, to: to.trim() });
-      toast('Sending… you can follow it in the panel at the bottom right.');
-      up.dismissed = false; poll();
-    }
+    else if (act === 'share') openShare(file);
     else if (act === 'mv') {
       const src = dir ? dir.path : file.path;
       const dst = prompt('New name, or a full path like /Videos/name to move it:', src.split('/').pop());
@@ -721,6 +751,170 @@ async function trashClick(e) {
   } catch (err) { toast(err.message); }
 }
 const kindOf = name => { const x = (name.split('.').pop() || '').toLowerCase(); return /^(jpe?g|png|gif|webp|bmp|heic|avif|svg)$/.test(x) ? 'image' : /^(mp4|mkv|webm|mov|avi|m4v|ts)$/.test(x) ? 'video' : /^(mp3|m4a|flac|ogg|opus|wav|aac)$/.test(x) ? 'audio' : /^(zip|rar|7z|tar|gz|bz2|xz|iso)$/.test(x) ? 'archive' : /^(pdf|docx?|xlsx?|pptx?|txt|md|csv|odt|rtf|epub|srt)$/.test(x) ? 'document' : 'other'; };
+
+/* ---------- duplicates ---------- */
+const dups = { groups: [], extra: 0 };
+async function loadDups() {
+  try {
+    const r = await api('/api/duplicates');
+    dups.groups = r.groups; dups.extra = r.extra_bytes;
+    state.dirs = []; state.files = r.groups.flatMap(g => g.files);
+    renderDups();
+  } catch (e) { $('#content').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function renderDups() {
+  $('#crumbs').innerHTML = '<a>Duplicates</a>';
+  state.shown = state.files;
+  const n = dups.groups.length;
+  const note = `<div class="note"><span>${n
+    ? `${n} file${n === 1 ? ' has' : 's have'} identical copies. ` + (dups.extra ? `<b>${fmtSize(dups.extra)}</b> is stored more than once in Telegram.` : 'Each is stored only once in Telegram (SpiDrive reused the upload), so the copies only clutter your folders.')
+    : 'No identical files. When you upload something that is already on the drive, SpiDrive adds it instantly instead of uploading it again.'}</span>${n ? '<button class="btn sm" data-dupsel="all">Select all extra copies</button>' : ''}</div>`;
+  if (!n) { $('#content').innerHTML = note; return updateSel(); }
+  let i = 0, rows = '';
+  dups.groups.forEach((g, gi) => {
+    rows += `<tr class="grp"><td colspan="5">${g.files.length} copies · ${fmtSize(g.size)} each<small>${g.stored > 1 ? `stored ${g.stored} times in Telegram` : 'stored once in Telegram'}</small> <button class="btn sm ghost" data-dupsel="${gi}">Select extra copies</button></td></tr>`;
+    g.files.forEach((f, j) => {
+      rows += `<tr class="row" data-i="${i}" data-k="${esc('f:' + f.path)}"><td class="sel"><input type="checkbox" class="cb" data-n="${i}" aria-label="Select"></td><td><div class="name">${kindIco(f.kind)}<span dir="auto" title="${esc(f.name)}">${esc(f.name)}</span>${j === 0 ? '<span class="tag" title="Added first">oldest</span>' : ''}</div></td><td class="dim hide-sm" dir="auto">${esc(f.folder)}</td><td class="dim hide-sm">${fmtDate(f.created)}</td><td class="dim num">${fmtSize(f.size)}</td></tr>`;
+      i++;
+    });
+  });
+  $('#content').innerHTML = note + `<table><thead><tr><th class="sel"></th><th>Name</th><th class="hide-sm">Folder</th><th class="hide-sm">Added</th><th class="num">Size</th></tr></thead><tbody>${rows}</tbody></table>`;
+  updateSel();
+}
+function dupSelect(which) {
+  const groups = which === 'all' ? dups.groups : [dups.groups[+which]];
+  for (const g of groups) for (const f of g.files.slice(1)) state.sel.set('f:' + f.path, { key: 'f:' + f.path, path: f.path, file: f });
+  updateSel();
+}
+
+/* ---------- drive health ---------- */
+function renderHealth(h) {
+  if (!h) return;
+  const label = h.status === 'good' ? 'Good' : h.status === 'problem' ? `${h.problems} problem${h.problems === 1 ? '' : 's'}` : 'Not checked yet';
+  $('#hCard').innerHTML = `<div class="hd"><span>Drive health</span><b class="pill ${h.status === 'good' ? 'on' : h.status === 'problem' ? 'bad' : ''}">${label}</b></div>` +
+    `<div class="meter" title="${h.percent}%"><i style="width:${h.percent}%"></i></div>` +
+    `<div class="sub">${Math.round(h.percent)}% of your data re-checked against its SHA-256 in the last 30 days${h.last_check ? ` · last check ${esc(fmtDate(h.last_check))}` : ''}</div>` +
+    `<div class="row"><button class="btn sm" data-h="check" ${h.running ? 'disabled' : ''}>${h.running ? 'Checking…' : 'Check now'}</button>${h.problems ? '<button class="btn sm danger" data-h="show">See problems</button>' : ''}</div>`;
+}
+$('#hCard').addEventListener('click', async e => {
+  const b = e.target.closest('[data-h]'); if (!b) return;
+  if (b.dataset.h === 'show') return openHealth();
+  try { await api('/api/health/check', {}); toast('Downloading a few random files again to compare them with their checksums…'); b.disabled = true; b.textContent = 'Checking…'; setTimeout(loadStats, 5000); }
+  catch (err) { toast(err.message); }
+});
+async function openHealth() {
+  let h; try { h = await api('/api/health'); } catch (e) { return toast(e.message); }
+  $('#dlgTitle').textContent = 'Drive health problems';
+  $('#dlgBody').innerHTML = `<p class="sub">These parts did not match the checksum saved when they were uploaded, or are gone from the channel. If you still have the file, upload it again (the damaged copy is kept as an older version). Files whose messages were deleted in Telegram leave the drive by themselves within a few minutes.</p>` +
+    h.problems.map(p => `<div class="vrow"><div><b dir="auto">${esc(p.path.split('/').pop())}</b><small dir="auto">${esc(p.path)} · part ${p.part}</small><small>${esc(p.error)} · ${esc(fmtDate(p.checked))}</small></div><button class="btn sm" data-go-folder="${esc(p.path.slice(0, p.path.lastIndexOf('/')) || '/')}">Show</button></div>`).join('');
+  $('#dlgBody').onclick = e => { const b = e.target.closest('[data-go-folder]'); if (b) { closeDlg(); go(b.dataset.goFolder); } };
+  $('#dlg').classList.add('on');
+}
+
+/* ---------- sharing: Telegram contact or a link on this Wi-Fi ---------- */
+async function openShare(f) {
+  $('#dlgTitle').textContent = 'Share ' + f.name;
+  $('#dlgBody').innerHTML = `<h4>Send on Telegram</h4><div class="line"><input type="text" id="shTo" placeholder="@username, a phone number in your contacts, or  me" value="${esc(store.get('lastShare', ''))}" dir="auto"><button class="btn sm primary" id="shSend">Send</button></div>
+    <div class="sub" style="font-size:12.5px;margin-top:4px">They get a normal file. Encrypted and split files are joined and decrypted first.</div>
+    <h4>Link on this Wi-Fi</h4><div class="sub" style="font-size:12.5px">Opens on any phone or computer on the same network: photos, music and video play right in the browser. It works while this PC is on, until it expires.</div>
+    <div class="line" style="margin-top:8px"><select id="shHours"><option value="1">for 1 hour</option><option value="24" selected>for 1 day</option><option value="168">for 7 days</option><option value="720">for 30 days</option></select><button class="btn sm" id="shLink">Create link</button></div>
+    <div id="shLinks"></div>`;
+  $('#dlg').classList.add('on');
+  renderLinks(f);
+  $('#dlgBody').onclick = async e => {
+    const t = e.target;
+    try {
+      if (t.id === 'shSend') {
+        const to = $('#shTo').value.trim(); if (!to) return $('#shTo').focus();
+        store.set('lastShare', to);
+        await api('/api/share', { path: f.path, to });
+        closeDlg(); toast('Sending… you can follow it in the panel at the bottom right.'); up.dismissed = false; poll();
+      } else if (t.id === 'shLink') {
+        const l = await api('/api/links', { path: f.path, hours: +$('#shHours').value });
+        await renderLinks(f); copyText(l.url, 'Link copied. Open it on a phone or computer on this Wi-Fi.');
+      } else if (t.dataset.copy) copyText(t.dataset.copy, 'Link copied');
+      else if (t.dataset.revoke) { await api('/api/links/revoke', { token: t.dataset.revoke }); renderLinks(f); toast('The link no longer works'); }
+      else if (t.matches('.lnk input')) t.select();
+    } catch (err) { toast(err.message); }
+  };
+}
+async function renderLinks(f) {
+  try {
+    const r = await api('/api/links?path=' + encodeURIComponent(f.path));
+    $('#shLinks').innerHTML = r.links.map(l => `<div class="lnk"><input type="text" readonly value="${esc(l.url)}" aria-label="Share link"><div class="line" style="margin-top:6px;justify-content:space-between"><small>Works until ${esc(fmtDate(l.expires))} · ${l.downloads} download${l.downloads === 1 ? '' : 's'}</small><span><button class="btn sm" data-copy="${esc(l.url)}">Copy</button> <button class="btn sm ghost danger" data-revoke="${esc(l.token)}">Remove</button></span></div></div>`).join('');
+  } catch (e) { toast(e.message); }
+}
+async function copyText(text, msg) {
+  try { await navigator.clipboard.writeText(text); toast(msg); } catch { prompt('Copy this:', text); }
+}
+
+/* ---------- upload controls ---------- */
+function syncUploadControls() {
+  $('#pPause').textContent = up.paused ? 'Resume' : 'Pause';
+  const sel = $('#pLimit'), v = String(up.limit || 0);
+  if (![...sel.options].some(o => o.value === v)) sel.insertAdjacentHTML('beforeend', `<option value="${v}">${fmtSize(+v)}/s</option>`);
+  sel.value = v;
+}
+async function setUploads(body) {
+  try {
+    const r = await api('/api/uploads', body);
+    up.paused = r.paused; up.limit = r.limit; syncUploadControls(); poll(); loadStats();
+    if ('paused' in body) toast(r.paused ? 'Uploads paused. New files wait on this PC until you resume.' : 'Uploads resumed');
+    else toast(r.limit ? `Uploads limited to ${fmtSize(r.limit)}/s` : 'No upload speed limit');
+  } catch (e) { toast(e.message); }
+}
+$('#pPause').onclick = () => setUploads({ paused: !up.paused });
+$('#pLimit').onchange = e => setUploads({ limit: +e.target.value });
+$('#sMeta').addEventListener('click', e => { if (e.target.closest('[data-resume]')) setUploads({ paused: false }); });
+
+/* ---------- passphrase and recovery key ---------- */
+function openChangePass() {
+  $('#dlgTitle').textContent = 'Change the encryption passphrase';
+  $('#dlgBody').innerHTML = `<p class="sub">Your files are not encrypted again: only the key that unlocks them is re-locked with the new passphrase. It takes a second.</p>
+    <div id="cpCurBox"><h4>Current passphrase</h4><input type="password" id="cpCur" style="width:100%" autocomplete="current-password"><div class="sub" style="font-size:12.5px;margin-top:4px"><a href="#" id="cpUseRk">Forgot it? Use your recovery key</a></div></div>
+    <div id="cpRkBox" style="display:none"><h4>Recovery key</h4><input type="text" id="cpRk" style="width:100%" placeholder="ABCD-EFGH-…" spellcheck="false" autocomplete="off"></div>
+    <h4>New passphrase</h4><input type="password" id="cpNew" style="width:100%" autocomplete="new-password" placeholder="at least 8 characters">
+    <h4>New passphrase again</h4><input type="password" id="cpNew2" style="width:100%" autocomplete="new-password">
+    <div class="line" style="justify-content:flex-end;margin-top:14px"><button class="btn" id="cpCancel">Cancel</button><button class="btn primary" id="cpGo">Change passphrase</button></div>`;
+  $('#dlg').classList.add('on'); $('#cpCur').focus();
+  $('#dlgBody').onclick = async e => {
+    if (e.target.id === 'cpUseRk') { e.preventDefault(); $('#cpCurBox').style.display = 'none'; $('#cpRkBox').style.display = ''; $('#cpRk').focus(); }
+    else if (e.target.id === 'cpCancel') closeDlg();
+    else if (e.target.id === 'cpGo') {
+      const n = $('#cpNew').value;
+      if (n.length < 8) return toast('The new passphrase must have at least 8 characters.');
+      if (n !== $('#cpNew2').value) return toast('The two new passphrases are different.');
+      const body = $('#cpRkBox').style.display === 'none' ? { current: $('#cpCur').value, new: n } : { recovery_key: $('#cpRk').value, new: n };
+      try { await api('/api/keys/passphrase', body); closeDlg(); toast('Passphrase changed. No file had to be encrypted again.'); openSettings(); }
+      catch (err) { toast(err.message); }
+    }
+  };
+}
+async function newRecoveryKey(had) {
+  if (had && !confirm('Make a new recovery key? The old one stops working.')) return;
+  let r; try { r = await api('/api/keys/recovery', {}); } catch (e) { return toast(e.message); }
+  $('#dlgTitle').textContent = 'Your recovery key';
+  $('#dlgBody').innerHTML = `<p class="sub">This key opens your encrypted files and the index backup in the channel if you forget your passphrase, also on a new PC. It is shown only now. Print it or write it down, and keep it somewhere safe, away from this PC.</p>
+    <div class="rk" id="rkText">${esc(r.recovery_key.slice(0, 19))}<br>${esc(r.recovery_key.slice(20))}</div>
+    <div class="line" style="justify-content:flex-end"><button class="btn" id="rkCopy">Copy</button><button class="btn" id="rkPrint">Print</button><button class="btn primary" id="rkDone">I have saved it</button></div>`;
+  $('#dlg').classList.add('on');
+  $('#dlgBody').onclick = e => {
+    if (e.target.id === 'rkCopy') copyText(r.recovery_key, 'Recovery key copied');
+    else if (e.target.id === 'rkPrint') printRecovery(r.recovery_key);
+    else if (e.target.id === 'rkDone') { closeDlg(); openSettings(); }
+  };
+}
+function printRecovery(key) {
+  const w = window.open('', '_blank');
+  if (!w) return toast('Allow pop-ups for SpiDrive to print, or copy the key instead.');
+  w.document.write(`<!doctype html><title>SpiDrive recovery key</title><body style="font:15px/1.6 system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 20px">
+    <h1 style="font-size:22px">SpiDrive recovery key</h1><p>Made on ${esc(new Date().toLocaleString())}.</p>
+    <p style="font:600 24px/1.7 ui-monospace,Consolas,monospace;letter-spacing:.06em;border:2px solid #000;border-radius:10px;padding:16px;text-align:center">${esc(key)}</p>
+    <p>If you forget your encryption passphrase: open SpiDrive, <b>Settings → Encryption → Change passphrase → Use your recovery key</b>.<br>
+    On a new PC: run <b>drive.py restore-index</b> and type this key when it asks.</p>
+    <p>Anyone with this key and your Telegram account can read your files. Keep it somewhere safe.</p></body>`);
+  w.document.close(); w.focus(); w.print();
+}
 
 /* ---------- versions ---------- */
 async function openVersions(f) {
@@ -855,10 +1049,10 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeViewer();
     else if (e.key === 'ArrowRight' && e.target.tagName !== 'VIDEO') step(1);
     else if (e.key === 'ArrowLeft' && e.target.tagName !== 'VIDEO') step(-1);
-  } else if ($('#settings').classList.contains('on')) {
-    if (e.key === 'Escape') closeSettings();
   } else if ($('#dlg').classList.contains('on')) {
     if (e.key === 'Escape') closeDlg();
+  } else if ($('#settings').classList.contains('on')) {
+    if (e.key === 'Escape') closeSettings();
   } else if (e.key === 'Escape' && $('#qHelp').classList.contains('on')) $('#qHelp').classList.remove('on');
   else if (e.key === 'Escape' && state.sel.size) clearSel();
   else if (typing) return;
@@ -961,7 +1155,8 @@ function send(it) {
 async function poll() {
   clearTimeout(pollT); up.polling = true;
   try {
-    up.jobs = (await api('/api/jobs')).jobs;
+    const jr = await api('/api/jobs');
+    up.jobs = jr.jobs; up.paused = jr.paused; up.limit = jr.limit; syncUploadControls();
     let changed = false;
     for (const j of up.jobs) if (j.state === 'done' && !up.doneSeen.has(j.id)) { up.doneSeen.add(j.id); changed = true; }
     const keeping = new Set(up.jobs.filter(j => j.state === 'keeping').map(j => j.id));
@@ -970,8 +1165,9 @@ async function poll() {
     if (changed) refresh();
     renderPanel();
   } catch {}
-  const active = up.jobs.some(j => ['queued','uploading','retry','sharing','keeping'].includes(j.state)) || up.items.some(i => i.state === 'waiting' || i.state === 'sending');
-  if (active) pollT = setTimeout(poll, 1200);
+  const busy = up.jobs.some(j => ['queued','uploading','retry','sharing','keeping'].includes(j.state)) || up.items.some(i => i.state === 'waiting' || i.state === 'sending');
+  const paused = up.jobs.some(j => j.state === 'paused');
+  if (busy || paused) pollT = setTimeout(poll, busy ? 1200 : 6000);
   else up.polling = false;
 }
 function renderPanel() {
@@ -985,12 +1181,12 @@ function renderPanel() {
   for (const j of up.jobs) {
     if (up.hidden.has(j.id)) continue;
     const pct = j.total ? Math.round(j.done * 100 / j.total) : 100;
-    const s = j.state === 'keeping' ? `Keeping on this PC ${pct}%` : j.state === 'queued' ? 'Waiting for Telegram' : j.state === 'uploading' ? `Uploading to Telegram ${pct}%` : j.state === 'retry' ? `Network problem, retrying soon (${j.error})` : j.state === 'sharing' ? (j.total ? `Sending ${pct}%` : 'Sending…') : j.state === 'done' ? 'Done' : `Failed: ${j.error}`;
+    const s = j.state === 'paused' ? 'Paused: waiting on this PC' : j.state === 'keeping' ? `Keeping on this PC ${pct}%` : j.state === 'queued' ? 'Waiting for Telegram' : j.state === 'uploading' ? `Uploading to Telegram ${pct}%` : j.state === 'retry' ? `Network problem, retrying soon (${j.error})` : j.state === 'sharing' ? (j.total ? `Sending ${pct}%` : 'Sending…') : j.state === 'done' ? 'Done' : `Failed: ${j.error}`;
     rows.push(`<div class="job ${j.state === 'done' ? 'done' : j.state === 'error' || j.state === 'retry' ? 'err' : ''}"><div class="n" dir="auto">${esc(j.path)}</div><div class="s"><span>${esc(s)}</span><span>${fmtSize(j.total)}</span></div><div class="p"><i style="width:${j.state === 'queued' ? 0 : pct}%"></i></div></div>`);
   }
-  const active = up.items.filter(i => i.state === 'waiting' || i.state === 'sending').length + up.jobs.filter(j => ['queued','uploading','retry','sharing','keeping'].includes(j.state)).length;
+  const active = up.items.filter(i => i.state === 'waiting' || i.state === 'sending').length + up.jobs.filter(j => ['queued','uploading','retry','sharing','keeping','paused'].includes(j.state)).length;
   if (active && !up.dismissed) $('#panel').classList.add('on');
-  $('#pTitle').textContent = active ? `Uploading ${active} item${active === 1 ? '' : 's'}` : 'Uploads finished';
+  $('#pTitle').textContent = up.paused && active ? `Paused · ${active} waiting` : active ? `Uploading ${active} item${active === 1 ? '' : 's'}` : 'Uploads finished';
   $('#pList').innerHTML = rows.join('') || '<div class="job"><div class="s">Nothing here</div></div>';
   if (!rows.length && !active) $('#panel').classList.remove('on');
 }
@@ -1022,21 +1218,25 @@ async function loadStats() {
       `<div><span>Encryption</span><b class="pill ${s.encryption ? 'on' : ''}">${s.encryption ? 'AES-256 on' : 'off'}</b></div>` +
       (s.connection ? `<div><span>Connection</span><b class="pill ${s.connection.searching || s.connection.error ? 'warn' : s.connection.kind === 'direct' ? '' : 'on'}" title="${esc(s.connection.error || '')}">${esc(connLabel(s.connection))}</b></div>` : '') +
       `<div><span>Telegram messages</span><b>${s.messages}</b></div>` +
-      `<div><span>Index backup</span><b>${esc(backup)}</b></div>` +
-      (s.sync || []).map(p => `<div title="${esc(p.local)} ⇄ ${esc(p.remote)}"><span>Sync ${esc(p.remote)}</span><b class="pill ${/^in sync/.test(p.status) ? 'on' : /error|paused/.test(p.status) ? 'warn' : ''}">${esc(p.status)}</b></div>`).join('') +
+      `<div title="${s.last_backup && !s.backup_encrypted ? 'Set an encryption passphrase in Settings to encrypt the index backup' : 'The daily copy of the file list in your channel'}"><span>Index backup</span><b>${esc(backup)}${s.last_backup ? (s.backup_encrypted ? ' · encrypted' : ' · not encrypted') : ''}</b></div>` +
+      (s.uploads && s.uploads.paused ? `<div><span>Uploads</span><b class="pill warn" data-resume style="cursor:pointer" title="Click to resume">paused · resume</b></div>` : '') +
+      (s.uploads && s.uploads.limit ? `<div><span>Upload speed</span><b>max ${fmtSize(s.uploads.limit)}/s</b></div>` : '') +
+      (s.links ? `<div><span>Share links</span><b>${s.links} active</b></div>` : '') +
+      (s.sync || []).map(p => `<div title="${esc(p.local)} ${p.mode === 'backup' ? '→' : '⇄'} ${esc(p.remote)}"><span>${p.mode === 'backup' ? 'Backup' : 'Sync'} ${esc(p.remote)}</span><b class="pill ${/^(in sync|backed up)/.test(p.status) ? 'on' : /error|paused|not found/.test(p.status) ? 'warn' : ''}">${esc(p.status)}</b></div>`).join('') +
       (s.trash ? `<div><span>Trash</span><b>${s.trash} · ${fmtSize(s.trash_bytes)}</b></div>` : '') +
       (s.versions ? `<div title="Older versions of replaced files, kept ${state.trashDays} days"><span>Older versions</span><b>${s.versions} · ${fmtSize(s.versions_bytes)}</b></div>` : '') +
       (s.pending ? `<div><span>Waiting to upload</span><b class="pill warn">${s.pending} · ${fmtSize(s.pending_bytes)}</b></div>` : '') +
       (s.incomplete ? `<div><span>Interrupted uploads</span><b class="pill warn">${s.incomplete}</b></div>` : '');
+    renderHealth(s.health);
     if (s.pending && !up.polling) poll();
   } catch (e) { $('#chan').textContent = 'Not connected'; }
 }
 /* ---------- settings ---------- */
 const setv = { data: null };
-function pairRow(p = { local: '', remote: '/Sync' }) {
+function pairRow(p = { local: '', remote: '/Sync', mode: 'sync' }) {
   const row = document.createElement('div'); row.className = 'pair';
-  row.innerHTML = `<input type="text" class="pl" placeholder="D:\\SpiDrive Sync" aria-label="Folder on this PC"><input type="text" class="pr" placeholder="/Sync" aria-label="Folder on the drive"><button class="btn icon sm ghost" title="Remove">✕</button>`;
-  row.querySelector('.pl').value = p.local; row.querySelector('.pr').value = p.remote;
+  row.innerHTML = `<input type="text" class="pl" placeholder="D:\\SpiDrive Sync" aria-label="Folder on this PC"><input type="text" class="pr" placeholder="/Sync" aria-label="Folder on the drive"><select class="pm" aria-label="How"><option value="sync">Two-way sync</option><option value="backup">Backup only</option></select><button class="btn icon sm ghost" title="Remove">✕</button>`;
+  row.querySelector('.pl').value = p.local; row.querySelector('.pr').value = p.remote; row.querySelector('.pm').value = p.mode || 'sync';
   row.querySelector('button').onclick = () => row.remove();
   return row;
 }
@@ -1052,10 +1252,17 @@ async function openSettings() {
   $('#sPass').value = ''; $('#sWebPw').value = '';
   $('#sPassBox').style.display = s.has_passphrase && s.passphrase_locked ? 'none' : '';
   $('#sPassInfo').innerHTML = s.has_passphrase
-    ? (s.passphrase_locked ? `A passphrase is set and ${s.encrypted_files} file(s) use it, so it can't be changed. Turning encryption off only affects new uploads.` : 'A passphrase is set. Type a new one only to replace it.')
-    : 'If you lose the passphrase, encrypted files cannot be recovered.';
+    ? (s.passphrase_locked ? `A passphrase is set (${s.encrypted_files} encrypted file${s.encrypted_files === 1 ? '' : 's'}). It also encrypts the daily index backup. Turning encryption off only affects new uploads.` : 'A passphrase is set. Type a new one only to replace it.')
+    : 'A passphrase also encrypts the daily index backup in your channel. Without it, or a recovery key, encrypted files cannot be recovered.';
   $('#sPhoneInfo').innerHTML = (s.has_web_password ? 'A password is set. Leave empty to keep it. ' : '') + `On your phone, open <b>http://&lt;this PC's IP&gt;:${s.web_port}</b>, then <i>Add to Home screen</i>.`;
   const box = $('#sPairs'); box.innerHTML = ''; s.sync.forEach(p => box.appendChild(pairRow(p)));
+  const used = new Set(s.sync.map(p => p.local.toLowerCase()));
+  $('#sKnown').innerHTML = Object.entries(s.known_folders || {}).filter(([, v]) => !used.has(v.toLowerCase()))
+    .map(([k, v]) => `<button class="btn sm ghost" data-known="${esc(v)}" data-label="${esc(k)}" title="${esc(v)}">+ Back up ${esc(k)}</button>`).join('');
+  $('#sPhoneCmd').checked = s.phone_commands; $('#sOrganize').checked = s.inbox_organize; $('#sHealth').checked = s.health_check;
+  $('#sKeyBox').style.display = s.has_passphrase ? '' : 'none';
+  $('#sKeyInfo').innerHTML = s.recovery_key ? `Recovery key made ${esc(fmtDate(s.recovery_key))}. Keep the printout somewhere safe.` : 'No recovery key yet. Make one and print it: it opens your files and the index backup if you ever forget the passphrase.';
+  $('#sRecovery').textContent = s.recovery_key ? 'New recovery key' : 'Create recovery key';
   $('#sPMode').value = s.proxy_mode || 'auto'; $('#sPLink').value = s.proxy_link || ''; $('#sPSources').value = (s.proxy_sources || []).join('\n');
   $('#sPTestOut').textContent = ''; $('#sPStatus').textContent = 'Now: ' + connLabel(s.proxy_status) + (s.proxy_status && s.proxy_status.error ? ' — ' + s.proxy_status.error : ''); syncProxyUI();
   document.querySelectorAll('#settings input, #settings select, #settings textarea, #setSave, #sAddPair').forEach(el => el.disabled = !s.editable);
@@ -1066,6 +1273,12 @@ function syncSetUI() { $('#sPhoneBox').style.display = $('#sPhone').checked ? ''
 function closeSettings() { $('#settings').classList.remove('on'); }
 $('#sPhone').onchange = syncSetUI;
 $('#sAddPair').onclick = () => $('#sPairs').appendChild(pairRow());
+$('#sKnown').addEventListener('click', e => {
+  const b = e.target.closest('[data-known]'); if (!b) return;
+  $('#sPairs').appendChild(pairRow({ local: b.dataset.known, remote: '/Backup/' + b.dataset.label, mode: 'backup' })); b.remove();
+});
+$('#sChangePass').onclick = openChangePass;
+$('#sRecovery').onclick = () => newRecoveryKey($('#sRecovery').textContent.startsWith('New'));
 $('#setClose').onclick = closeSettings; $('#setCancel').onclick = closeSettings;
 $('#settings').addEventListener('click', e => { if (e.target.id === 'settings') closeSettings(); });
 $('#setSave').onclick = async () => {
@@ -1075,7 +1288,8 @@ $('#setSave').onclick = async () => {
     phone_access: $('#sPhone').checked, web_password: $('#sWebPw').value,
     proxy_mode: $('#sPMode').value, proxy_link: $('#sPLink').value.trim(),
     proxy_sources: $('#sPSources').value.split('\n').map(x => x.trim()).filter(Boolean),
-    sync: [...document.querySelectorAll('#sPairs .pair')].map(r => ({ local: r.querySelector('.pl').value, remote: r.querySelector('.pr').value })),
+    sync: [...document.querySelectorAll('#sPairs .pair')].map(r => ({ local: r.querySelector('.pl').value, remote: r.querySelector('.pr').value, mode: r.querySelector('.pm').value })),
+    phone_commands: $('#sPhoneCmd').checked, inbox_organize: $('#sOrganize').checked, health_check: $('#sHealth').checked,
   };
   try {
     const r = await api('/api/settings', body);
